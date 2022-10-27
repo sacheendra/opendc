@@ -64,3 +64,4 @@ include(":opendc-trace:opendc-trace-calcite")
 include(":opendc-trace:opendc-trace-tools")
 
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
+enableFeaturePreview("VERSION_CATALOGS")
