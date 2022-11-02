@@ -24,18 +24,27 @@
 
 package org.opendc.experiments.compute
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.apache.commons.math3.distribution.LogNormalDistribution
+import org.apache.commons.math3.distribution.RealDistribution
 import org.apache.commons.math3.random.Well19937c
 import org.opendc.compute.service.ComputeService
 import org.opendc.compute.simulator.SimHost
+import org.opendc.compute.simulator.failure.HostFault
 import org.opendc.compute.simulator.failure.HostFaultInjector
 import org.opendc.compute.simulator.failure.StartStopHostFault
 import org.opendc.compute.simulator.failure.StochasticVictimSelector
+import org.opendc.compute.simulator.failure.VictimSelector
 import java.time.Clock
 import java.time.Duration
 import java.util.Random
 import kotlin.coroutines.CoroutineContext
 import kotlin.math.ln
+import kotlin.math.roundToLong
 
 /**
  * Obtain a [FailureModel] based on the GRID'5000 failure trace.
@@ -69,3 +78,88 @@ public fun grid5000(failureInterval: Duration): FailureModel {
         override fun toString(): String = "Grid5000FailureModel"
     }
 }
+
+public fun cloudUptimeArchive(traceName: String, failureInterval: Duration): FailureModel {
+    return object : FailureModel {
+        override fun createInjector(
+            context: CoroutineContext,
+            clock: Clock,
+            service: ComputeService,
+            random: Random
+        ): HostFaultInjector {
+            val rng = Well19937c(random.nextLong())
+            val hosts = service.hosts.map { it as SimHost }.toSet()
+
+            // Parameters from A. Iosup, A Framework for the Study of Grid Inter-Operation Mechanisms, 2009
+            // GRID'5000
+            return TraceBasedFaultInjector(
+                context,
+                clock,
+                hosts,
+                traceName
+            )
+        }
+
+        override fun toString(): String = "CloudUptimeArchiveFailureModel"
+    }
+}
+
+public class TraceBasedFaultInjector(
+    private val context: CoroutineContext,
+    private val clock: Clock,
+    private val hosts: Set<SimHost>,
+    private val traceName: String
+) : HostFaultInjector {
+    /**
+     * The scope in which the injector runs.
+     */
+    private val scope = CoroutineScope(context + Job())
+
+    /**
+     * The [Job] that awaits the nearest fault in the system.
+     */
+    private var job: Job? = null
+
+    /**
+     * Start the fault injection into the system.
+     */
+    override fun start() {
+        if (job != null) {
+            return
+        }
+
+        job = scope.launch {
+            runInjector()
+            job = null
+        }
+    }
+
+    /**
+     * Converge the injection process.
+     */
+    private suspend fun runInjector() {
+        while (true) {
+            // Make sure to convert delay from hours to milliseconds
+            val d = (iat.sample() * 3.6e6).roundToLong()
+
+            // Handle long overflow
+            if (clock.millis() + d <= 0) {
+                return
+            }
+
+            delay(d)
+
+            val victims = selector.select(hosts)
+            fault.apply(clock, victims)
+        }
+    }
+
+    /**
+     * Stop the fault injector.
+     */
+    public override fun close() {
+        scope.cancel()
+    }
+}
+
+
