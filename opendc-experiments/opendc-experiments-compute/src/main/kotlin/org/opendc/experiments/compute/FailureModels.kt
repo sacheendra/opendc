@@ -27,10 +27,10 @@ package org.opendc.experiments.compute
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.apache.commons.math3.distribution.LogNormalDistribution
-import org.apache.commons.math3.distribution.RealDistribution
 import org.apache.commons.math3.random.Well19937c
 import org.opendc.compute.service.ComputeService
 import org.opendc.compute.simulator.SimHost
@@ -39,11 +39,15 @@ import org.opendc.compute.simulator.failure.HostFaultInjector
 import org.opendc.compute.simulator.failure.StartStopHostFault
 import org.opendc.compute.simulator.failure.StochasticVictimSelector
 import org.opendc.compute.simulator.failure.VictimSelector
+import org.opendc.trace.failure.FailureTraceReader
+import java.nio.file.Path
+import java.nio.file.Paths
 import java.time.Clock
 import java.time.Duration
 import java.util.Random
 import kotlin.coroutines.CoroutineContext
 import kotlin.math.ln
+import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 /**
@@ -120,6 +124,8 @@ public class TraceBasedFaultInjector(
      */
     private var job: Job? = null
 
+    private var failureList = FailureTraceReader.get(Paths.get("src/test/resources/failure_traces/test1.csv")).iterator()
+
     /**
      * Start the fault injection into the system.
      */
@@ -138,19 +144,30 @@ public class TraceBasedFaultInjector(
      * Converge the injection process.
      */
     private suspend fun runInjector() {
-        while (true) {
-            // Make sure to convert delay from hours to milliseconds
-            val d = (iat.sample() * 3.6e6).roundToLong()
+        while (failureList.hasNext()) {
+            val failure = failureList.next()
 
-            // Handle long overflow
-            if (clock.millis() + d <= 0) {
-                return
+            delay(failure.start - clock.millis())
+
+            val numVictims = (failure.intensity * hosts.size).roundToInt()
+            val victims = hosts.shuffled().take(numVictims)
+
+            scope.launch {
+                for (host in victims) {
+                    host.fail()
+                }
+
+                // Handle long overflow
+                if (clock.millis() + failure.duration <= 0) {
+                    return@launch
+                }
+
+                delay(failure.duration)
+
+                for (host in victims) {
+                    host.recover()
+                }
             }
-
-            delay(d)
-
-            val victims = selector.select(hosts)
-            fault.apply(clock, victims)
         }
     }
 
@@ -161,5 +178,3 @@ public class TraceBasedFaultInjector(
         scope.cancel()
     }
 }
-
-

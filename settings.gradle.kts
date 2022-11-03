@@ -62,6 +62,7 @@ include(":opendc-trace:opendc-trace-opendc")
 include(":opendc-trace:opendc-trace-parquet")
 include(":opendc-trace:opendc-trace-calcite")
 include(":opendc-trace:opendc-trace-tools")
+include(":opendc-trace:opendc-trace-failure")
 
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 enableFeaturePreview("VERSION_CATALOGS")
