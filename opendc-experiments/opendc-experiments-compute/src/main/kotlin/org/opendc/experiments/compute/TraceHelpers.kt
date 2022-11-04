@@ -27,7 +27,11 @@ package org.opendc.experiments.compute
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.yield
+import org.opendc.compute.api.Server
+import org.opendc.compute.api.ServerState
+import org.opendc.compute.api.ServerWatcher
 import org.opendc.compute.service.ComputeService
 import java.time.Clock
 import java.util.Random
@@ -102,12 +106,20 @@ public suspend fun ComputeService.replay(
                         meta = meta
                     )
 
+                    val w = Waiter()
+                    w.mutex.lock()
+                    server.watch(w)
                     // Wait for the server reach its end time
-                    val endTime = entry.stopTime.toEpochMilli()
-                    delay(endTime + workloadOffset - clock.millis() + 5 * 60 * 1000)
+                    w.mutex.lock()
+                    // Delete the server after reaching the end-time of the virtual machine
+                    server.delete()
 
-                    // Stop the server after reaching the end-time of the virtual machine
-                    server.stop()
+//                    // Wait for the server reach its end time
+//                    val endTime = entry.stopTime.toEpochMilli()
+//                    delay(endTime + workloadOffset - clock.millis() + 5 * 60 * 1000)
+//
+//                    // Stop the server after reaching the end-time of the virtual machine
+//                    server.stop()
                 }
             }
         }
@@ -116,5 +128,23 @@ public suspend fun ComputeService.replay(
     } finally {
         injector?.close()
         client.close()
+    }
+}
+
+public class Waiter() : ServerWatcher {
+    public val mutex: Mutex = Mutex()
+
+    public override fun onStateChanged(server: Server, newState: ServerState) {
+        when (newState) {
+            ServerState.TERMINATED -> {
+                mutex.unlock()
+            }
+
+            ServerState.ERROR -> {
+                mutex.unlock()
+            }
+
+            else -> {}
+        }
     }
 }

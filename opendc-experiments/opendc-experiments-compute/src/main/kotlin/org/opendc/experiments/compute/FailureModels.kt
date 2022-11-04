@@ -31,6 +31,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.apache.commons.math3.distribution.LogNormalDistribution
+import org.apache.commons.math3.distribution.RealDistribution
 import org.apache.commons.math3.random.Well19937c
 import org.opendc.compute.service.ComputeService
 import org.opendc.compute.simulator.SimHost
@@ -39,6 +40,7 @@ import org.opendc.compute.simulator.failure.HostFaultInjector
 import org.opendc.compute.simulator.failure.StartStopHostFault
 import org.opendc.compute.simulator.failure.StochasticVictimSelector
 import org.opendc.compute.simulator.failure.VictimSelector
+import org.opendc.simulator.compute.workload.SimRuntimeWorkload
 import org.opendc.trace.failure.FailureTraceReader
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -91,11 +93,8 @@ public fun cloudUptimeArchive(traceName: String, failureInterval: Duration): Fai
             service: ComputeService,
             random: Random
         ): HostFaultInjector {
-            val rng = Well19937c(random.nextLong())
             val hosts = service.hosts.map { it as SimHost }.toSet()
 
-            // Parameters from A. Iosup, A Framework for the Study of Grid Inter-Operation Mechanisms, 2009
-            // GRID'5000
             return TraceBasedFaultInjector(
                 context,
                 clock,
@@ -177,4 +176,60 @@ public class TraceBasedFaultInjector(
     public override fun close() {
         scope.cancel()
     }
+}
+
+public interface DurationHostFault {
+    /**
+     * Apply the fault to the specified [victims].
+     */
+    public suspend fun apply(clock: Clock, duration: Long, victims: List<SimHost>)
+}
+
+public class StopHostFault : DurationHostFault {
+
+    override suspend fun apply(clock: Clock, duration: Long, victims: List<SimHost>) {
+        for (host in victims) {
+            host.fail()
+        }
+
+        // Handle long overflow
+        if (clock.millis() + duration <= 0) {
+            return
+        }
+
+        delay(duration)
+
+        for (host in victims) {
+            host.recover()
+        }
+    }
+
+    override fun toString(): String = "StopHostFault"
+}
+
+public class CheckpointHostFault : DurationHostFault {
+
+    override suspend fun apply(clock: Clock, duration: Long, victims: List<SimHost>) {
+        for (host in victims) {
+            host.fail()
+            val servers = host.instances.toList()
+            for (server in servers) {
+                host.delete(server)
+                val workload = server.meta["workload"] as SimRuntimeWorkload
+            }
+        }
+
+        // Handle long overflow
+        if (clock.millis() + duration <= 0) {
+            return
+        }
+
+        delay(duration)
+
+        for (host in victims) {
+            host.recover()
+        }
+    }
+
+    override fun toString(): String = "StopHostFault"
 }
