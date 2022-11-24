@@ -122,6 +122,12 @@ public class SimRuntimeWorkload implements SimWorkload, FlowStageLogic {
         long delta = now - lastUpdate;
         long duration = this.remainingDuration - delta;
 
+        if (delta == 0 && this.ctx == null) {
+            // This means the workload has been terminated
+            // But, has not executed to completion
+            return Long.MAX_VALUE;
+        }
+
         if (duration <= 0) {
             final SimMachineContext machineContext = this.ctx;
             if (machineContext != null) {

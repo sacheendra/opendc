@@ -85,7 +85,6 @@ public suspend fun ComputeService.replay(
 
                 if (!submitImmediately) {
                     delay(max(0, (start - offset) - now))
-                    println((start - offset) - now)
                 }
 
                 val workload = SimRuntimeWorkload(

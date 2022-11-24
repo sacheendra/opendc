@@ -102,7 +102,7 @@ public fun cloudUptimeArchive(traceName: String, failureInterval: Duration): Fai
                 clock,
                 hosts,
                 traceName,
-                InstantMigrationHostFault(service)// StopHostFault()
+                InstantMigrationHostFault(service, clock)// StopHostFault()
             )
         }
 
@@ -199,21 +199,19 @@ public class StopHostFault : DurationHostFault {
 }
 
 public class InstantMigrationHostFault(
-    private val service: ComputeService) : DurationHostFault {
+    private val service: ComputeService, private val clock: Clock) : DurationHostFault {
 
     override suspend fun apply(clock: Clock, duration: Long, victims: List<SimHost>) {
         val client = service.newClient()
 
         for (host in victims) {
-            host.fail()
             val servers = host.instances.shuffled()
-            for (server in servers) {
-                val old = server.meta["workload"] as SimRuntimeWorkload
-                println("cool")
-                old.cpuCount = 1
-                val new = SimRuntimeWorkload(old.remainingDuration, old.utilization)
-                new.cpuCount = 2
-                client.rescheduleServer(server, new)
+            val snapshots = servers.map { (it.meta["workload"] as SimRuntimeWorkload).snapshot() }
+            host.fail()
+
+            for ((server, snapshot) in servers.zip(snapshots)) {
+                snapshot.cpuCount = 2
+                client.rescheduleServer(server, snapshot)
             }
         }
 
