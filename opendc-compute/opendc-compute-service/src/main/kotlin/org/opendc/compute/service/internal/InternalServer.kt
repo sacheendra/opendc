@@ -100,7 +100,7 @@ internal class InternalServer(
                 val host = checkNotNull(host) { "Server not running" }
                 host.stop(this)
             }
-            ServerState.TERMINATED, ServerState.DELETED -> {} // No work needed
+            else -> {} // No work needed
         }
     }
 

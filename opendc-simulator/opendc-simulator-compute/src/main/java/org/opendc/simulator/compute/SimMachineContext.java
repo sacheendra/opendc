@@ -91,4 +91,6 @@ public interface SimMachineContext {
      * @param cause The cause for shutting down the workload.
      */
     void shutdown(Exception cause);
+
+//    void complete();
 }

@@ -183,7 +183,10 @@ public class Guest(
     private fun doStop(target: ServerState) {
         assert(ctx != null) { "Invalid job state" }
         val ctx = ctx ?: return
-        ctx.shutdown()
+        if (target == ServerState.ERROR)
+            ctx.shutdown(Exception("Error"))
+        else
+            ctx.shutdown()
 
         state = target
     }

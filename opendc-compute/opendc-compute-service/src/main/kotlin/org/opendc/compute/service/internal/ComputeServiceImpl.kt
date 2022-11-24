@@ -456,7 +456,7 @@ internal class ComputeServiceImpl(
 
         server.state = newState
 
-        if (newState == ServerState.TERMINATED || newState == ServerState.DELETED) {
+        if (newState == ServerState.TERMINATED || newState == ServerState.DELETED || newState == ServerState.COMPLETED) {
             logger.info { "[${clock.instant()}] Server ${server.uid} ${server.name} ${server.flavor} finished." }
 
             if (activeServers.remove(server) != null) {

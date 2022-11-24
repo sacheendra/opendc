@@ -49,5 +49,7 @@ public enum class ServerState {
     /**
      * The server has been deleted and cannot be started later on.
      */
-    DELETED
+    DELETED,
+
+    COMPLETED
 }
