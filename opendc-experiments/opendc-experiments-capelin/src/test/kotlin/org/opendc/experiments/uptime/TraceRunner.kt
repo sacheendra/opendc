@@ -22,7 +22,7 @@
 
 @file:JvmName("TraceHelpers")
 
-package org.opendc.experiments.compute
+package org.opendc.experiments.uptime
 
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -33,6 +33,9 @@ import org.opendc.compute.api.Server
 import org.opendc.compute.api.ServerState
 import org.opendc.compute.api.ServerWatcher
 import org.opendc.compute.service.ComputeService
+import org.opendc.experiments.compute.FailureModel
+import org.opendc.experiments.compute.VirtualMachine
+import org.opendc.simulator.compute.workload.SimRuntimeWorkload
 import java.time.Clock
 import java.util.Random
 import kotlin.coroutines.coroutineContext
@@ -82,16 +85,16 @@ public suspend fun ComputeService.replay(
 
                 if (!submitImmediately) {
                     delay(max(0, (start - offset) - now))
+                    println((start - offset) - now)
                 }
 
-                val workloadOffset = -offset + 300001
-                val workload = entry.trace.createWorkload(workloadOffset)
-                val meta = mutableMapOf<String, Any>("workload" to workload)
+                val workload = SimRuntimeWorkload(
+                    (entry.stopTime.toEpochMilli() - entry.startTime.toEpochMilli()),
+                    1.0,
+                )
 
-                val interferenceProfile = entry.interferenceProfile
-                if (interference && interferenceProfile != null) {
-                    meta["interference-profile"] = interferenceProfile
-                }
+//                val workloadOffset = -offset + 300001
+//                val workload = entry.trace.createWorkload(workloadOffset)
 
                 launch {
                     val server = client.newServer(
@@ -103,23 +106,23 @@ public suspend fun ComputeService.replay(
                             entry.memCapacity,
                             meta = if (entry.cpuCapacity > 0.0) mapOf("cpu-capacity" to entry.cpuCapacity) else emptyMap()
                         ),
-                        meta = meta
+                        meta = mapOf("workload" to workload)
                     )
 
-//                    val w = Waiter()
-//                    w.mutex.lock()
-//                    server.watch(w)
-//                    // Wait for the server reach its end time
-//                    w.mutex.lock()
-//                    // Delete the server after reaching the end-time of the virtual machine
-//                    server.delete()
-
+                    val w = Waiter()
+                    w.mutex.lock()
+                    server.watch(w)
                     // Wait for the server reach its end time
-                    val endTime = entry.stopTime.toEpochMilli()
-                    delay(endTime + workloadOffset - clock.millis() + 5 * 60 * 1000)
+                    w.mutex.lock()
+                    // Delete the server after reaching the end-time of the virtual machine
+                    server.delete()
 
-                    // Stop the server after reaching the end-time of the virtual machine
-                    server.stop()
+//                    // Wait for the server reach its end time
+//                    val endTime = entry.stopTime.toEpochMilli()
+//                    delay(endTime - offset - clock.millis() + 5 * 60 * 1000)
+//
+//                    // Stop the server after reaching the end-time of the virtual machine
+//                    server.stop()
                 }
             }
         }
@@ -131,16 +134,12 @@ public suspend fun ComputeService.replay(
     }
 }
 
-public class Waiter() : ServerWatcher {
-    public val mutex: Mutex = Mutex()
+class Waiter() : ServerWatcher {
+    val mutex = Mutex()
 
     public override fun onStateChanged(server: Server, newState: ServerState) {
         when (newState) {
             ServerState.TERMINATED -> {
-                mutex.unlock()
-            }
-
-            ServerState.ERROR -> {
                 mutex.unlock()
             }
 

@@ -145,7 +145,7 @@ internal class InternalServer(
     /**
      * Cancel the provisioning request if active.
      */
-    private fun cancelProvisioningRequest() {
+    public fun cancelProvisioningRequest() {
         val request = request
         if (request != null) {
             this.request = null

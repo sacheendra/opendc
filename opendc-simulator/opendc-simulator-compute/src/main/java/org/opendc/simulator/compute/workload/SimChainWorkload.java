@@ -34,7 +34,7 @@ import org.opendc.simulator.flow2.FlowGraph;
 /**
  * A {@link SimWorkload} that composes two {@link SimWorkload}s.
  */
-final class SimChainWorkload implements SimWorkload {
+public class SimChainWorkload implements SimWorkload {
     private final SimWorkload[] workloads;
     private int activeWorkloadIndex;
 

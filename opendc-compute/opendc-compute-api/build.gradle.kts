@@ -26,3 +26,7 @@ description = "API interface for the OpenDC Compute service"
 plugins {
     `kotlin-library-conventions`
 }
+
+dependencies {
+    api(projects.opendcSimulator.opendcSimulatorCompute)
+}

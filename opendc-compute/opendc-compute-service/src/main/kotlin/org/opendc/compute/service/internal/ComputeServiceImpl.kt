@@ -22,6 +22,7 @@
 
 package org.opendc.compute.service.internal
 
+import kotlinx.coroutines.runBlocking
 import mu.KotlinLogging
 import org.opendc.common.util.Pacer
 import org.opendc.compute.api.ComputeClient
@@ -35,6 +36,7 @@ import org.opendc.compute.service.driver.HostListener
 import org.opendc.compute.service.driver.HostState
 import org.opendc.compute.service.scheduler.ComputeScheduler
 import org.opendc.compute.service.telemetry.SchedulerStats
+import org.opendc.simulator.compute.workload.SimWorkload
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -216,6 +218,18 @@ internal class ComputeServiceImpl(
                 }
 
                 return ClientServer(server)
+            }
+
+            override suspend fun rescheduleServer(server: Server, workload: SimWorkload) {
+                val internalServer = serverById[server.uid]!!
+                val from = internalServer.host!!
+                internalServer.host = null
+                internalServer.cancelProvisioningRequest()
+                internalServer.state = ServerState.ERROR
+                from.delete(server)
+
+                internalServer.meta["workload"] = workload
+                internalServer.start()
             }
 
             override suspend fun findServer(id: UUID): Server? {

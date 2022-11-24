@@ -84,7 +84,7 @@ public class SimHost(
     /**
      * The virtual machines running on the hypervisor.
      */
-    private val guests = HashMap<Server, Guest>()
+    public val guests: HashMap<Server, Guest> = HashMap<Server, Guest>()
     private val _guests = mutableListOf<Guest>()
 
     override val instances: Set<Server>

@@ -34,14 +34,16 @@ import org.opendc.simulator.flow2.OutPort;
  * A [SimWorkload] that models application execution as a single duration.
  */
 public class SimRuntimeWorkload implements SimWorkload, FlowStageLogic {
-    private final long duration;
-    private final double utilization;
+    public final long duration;
+    public final double utilization;
+    public int cpuCount;
+    public final double cpuCapacity;
 
     private SimMachineContext ctx;
     private FlowStage stage;
     private OutPort[] outputs;
 
-    private long remainingDuration;
+    public long remainingDuration;
     private long lastUpdate;
 
     /**
@@ -50,7 +52,8 @@ public class SimRuntimeWorkload implements SimWorkload, FlowStageLogic {
      * @param duration The duration of the workload in milliseconds.
      * @param utilization The CPU utilization of the workload.
      */
-    SimRuntimeWorkload(long duration, double utilization) {
+    public SimRuntimeWorkload(long duration,
+                       double utilization) {
         if (duration < 0) {
             throw new IllegalArgumentException("Duration must be positive");
         } else if (utilization <= 0.0 || utilization > 1.0) {
@@ -60,6 +63,9 @@ public class SimRuntimeWorkload implements SimWorkload, FlowStageLogic {
         this.duration = duration;
         this.utilization = utilization;
         this.remainingDuration = duration;
+
+        this.cpuCount = 0;
+        this.cpuCapacity = 0;
     }
 
     @Override

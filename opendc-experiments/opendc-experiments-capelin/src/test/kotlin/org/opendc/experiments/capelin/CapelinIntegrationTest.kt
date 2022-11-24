@@ -230,6 +230,7 @@ class CapelinIntegrationTest {
             service.replay(clock, workload, seed, failureModel = grid5000(Duration.ofDays(7)))
         }
 
+        println(monitor.downtime)
         // Note that these values have been verified beforehand
         assertAll(
             { assertEquals(10085111, monitor.idleTime) { "Idle time incorrect" } },
@@ -277,6 +278,7 @@ class CapelinIntegrationTest {
         var lostTime = 0L
         var energyUsage = 0.0
         var uptime = 0L
+        var downtime = 0L
 
         override fun record(reader: HostTableReader) {
             idleTime += reader.cpuIdleTime
@@ -285,6 +287,7 @@ class CapelinIntegrationTest {
             lostTime += reader.cpuLostTime
             energyUsage += reader.powerTotal
             uptime += reader.uptime
+            downtime += reader.downtime
         }
     }
 }

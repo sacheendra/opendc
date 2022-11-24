@@ -33,6 +33,7 @@ import kotlinx.coroutines.launch
 import org.apache.commons.math3.distribution.LogNormalDistribution
 import org.apache.commons.math3.distribution.RealDistribution
 import org.apache.commons.math3.random.Well19937c
+import org.opendc.compute.api.ComputeClient
 import org.opendc.compute.service.ComputeService
 import org.opendc.compute.simulator.SimHost
 import org.opendc.compute.simulator.failure.HostFault
@@ -40,6 +41,7 @@ import org.opendc.compute.simulator.failure.HostFaultInjector
 import org.opendc.compute.simulator.failure.StartStopHostFault
 import org.opendc.compute.simulator.failure.StochasticVictimSelector
 import org.opendc.compute.simulator.failure.VictimSelector
+import org.opendc.simulator.compute.workload.SimChainWorkload
 import org.opendc.simulator.compute.workload.SimRuntimeWorkload
 import org.opendc.trace.failure.FailureTraceReader
 import java.nio.file.Path
@@ -99,7 +101,8 @@ public fun cloudUptimeArchive(traceName: String, failureInterval: Duration): Fai
                 context,
                 clock,
                 hosts,
-                traceName
+                traceName,
+                InstantMigrationHostFault(service)// StopHostFault()
             )
         }
 
@@ -111,7 +114,8 @@ public class TraceBasedFaultInjector(
     private val context: CoroutineContext,
     private val clock: Clock,
     private val hosts: Set<SimHost>,
-    private val traceName: String
+    private val traceName: String,
+    private val faultType: DurationHostFault
 ) : HostFaultInjector {
     /**
      * The scope in which the injector runs.
@@ -149,23 +153,10 @@ public class TraceBasedFaultInjector(
             delay(failure.start - clock.millis())
 
             val numVictims = (failure.intensity * hosts.size).roundToInt()
-            val victims = hosts.shuffled().take(numVictims)
+            val victims = hosts.take(numVictims)
 
             scope.launch {
-                for (host in victims) {
-                    host.fail()
-                }
-
-                // Handle long overflow
-                if (clock.millis() + failure.duration <= 0) {
-                    return@launch
-                }
-
-                delay(failure.duration)
-
-                for (host in victims) {
-                    host.recover()
-                }
+                faultType.apply(clock, failure.duration, victims)
             }
         }
     }
@@ -207,15 +198,22 @@ public class StopHostFault : DurationHostFault {
     override fun toString(): String = "StopHostFault"
 }
 
-public class CheckpointHostFault : DurationHostFault {
+public class InstantMigrationHostFault(
+    private val service: ComputeService) : DurationHostFault {
 
     override suspend fun apply(clock: Clock, duration: Long, victims: List<SimHost>) {
+        val client = service.newClient()
+
         for (host in victims) {
             host.fail()
-            val servers = host.instances.toList()
+            val servers = host.instances.shuffled()
             for (server in servers) {
-                host.delete(server)
-                val workload = server.meta["workload"] as SimRuntimeWorkload
+                val old = server.meta["workload"] as SimRuntimeWorkload
+                println("cool")
+                old.cpuCount = 1
+                val new = SimRuntimeWorkload(old.remainingDuration, old.utilization)
+                new.cpuCount = 2
+                client.rescheduleServer(server, new)
             }
         }
 

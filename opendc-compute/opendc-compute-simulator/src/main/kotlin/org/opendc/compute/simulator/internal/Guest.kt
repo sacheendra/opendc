@@ -39,14 +39,14 @@ import java.time.Instant
 /**
  * A virtual machine instance that is managed by a [SimHost].
  */
-internal class Guest(
+public class Guest(
     private val clock: Clock,
-    val host: SimHost,
+    public val host: SimHost,
     private val hypervisor: SimHypervisor,
     private val mapper: SimWorkloadMapper,
     private val listener: GuestListener,
-    val server: Server,
-    val machine: SimVirtualMachine
+    public val server: Server,
+    public val machine: SimVirtualMachine
 ) {
     /**
      * The state of the [Guest].
@@ -54,13 +54,13 @@ internal class Guest(
      * [ServerState.PROVISIONING] is an invalid value for a guest, since it applies before the host is selected for
      * a server.
      */
-    var state: ServerState = ServerState.TERMINATED
+    public var state: ServerState = ServerState.TERMINATED
         private set
 
     /**
      * Start the guest.
      */
-    fun start() {
+    public fun start() {
         when (state) {
             ServerState.TERMINATED, ServerState.ERROR -> {
                 LOGGER.info { "User requested to start server ${server.uid}" }
@@ -78,7 +78,7 @@ internal class Guest(
     /**
      * Stop the guest.
      */
-    fun stop() {
+    public fun stop() {
         when (state) {
             ServerState.RUNNING -> doStop(ServerState.TERMINATED)
             ServerState.ERROR -> doRecover()
@@ -93,7 +93,7 @@ internal class Guest(
      * This operation will stop the guest if it is running on the host and remove all resources associated with the
      * guest.
      */
-    fun delete() {
+    public fun delete() {
         stop()
 
         state = ServerState.DELETED
@@ -105,7 +105,7 @@ internal class Guest(
      *
      * This operation forcibly stops the guest and puts the server into an error state.
      */
-    fun fail() {
+    public fun fail() {
         if (state != ServerState.RUNNING) {
             return
         }
@@ -116,7 +116,7 @@ internal class Guest(
     /**
      * Recover the guest if it is in an error state.
      */
-    fun recover() {
+    public fun recover() {
         if (state != ServerState.ERROR) {
             return
         }
@@ -127,7 +127,7 @@ internal class Guest(
     /**
      * Obtain the system statistics of this guest.
      */
-    fun getSystemStats(): GuestSystemStats {
+    public fun getSystemStats(): GuestSystemStats {
         updateUptime()
 
         return GuestSystemStats(
@@ -140,7 +140,7 @@ internal class Guest(
     /**
      * Obtain the CPU statistics of this guest.
      */
-    fun getCpuStats(): GuestCpuStats {
+    public fun getCpuStats(): GuestCpuStats {
         val counters = machine.counters
         counters.sync()
 
@@ -223,7 +223,7 @@ internal class Guest(
     /**
      * Helper function to track the uptime and downtime of the guest.
      */
-    fun updateUptime() {
+    public fun updateUptime() {
         val now = clock.millis()
         val duration = now - _lastReport
         _lastReport = now

@@ -1,13 +1,10 @@
-package org.opendc.experiments.capelin
+package org.opendc.experiments.uptime
 
-import kotlinx.coroutines.sync.Mutex
+import io.mockk.InternalPlatformDsl.toStr
 import org.junit.jupiter.api.Assertions
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
-import org.opendc.compute.api.Server
-import org.opendc.compute.api.ServerState
-import org.opendc.compute.api.ServerWatcher
 import org.opendc.compute.service.ComputeService
 import org.opendc.compute.service.scheduler.FilterScheduler
 import org.opendc.compute.service.scheduler.filters.ComputeFilter
@@ -20,7 +17,6 @@ import org.opendc.experiments.compute.VirtualMachine
 import org.opendc.experiments.compute.cloudUptimeArchive
 import org.opendc.experiments.compute.grid5000
 import org.opendc.experiments.compute.registerComputeMonitor
-import org.opendc.experiments.compute.replay
 import org.opendc.experiments.compute.sampleByLoad
 import org.opendc.experiments.compute.setupComputeService
 import org.opendc.experiments.compute.setupHosts
@@ -67,9 +63,15 @@ class CloudUptimeArchive {
     @Test
     fun testFailures() = runSimulation {
         val seed = 0L
-        val topology = createTopology("single")
-        val workload = createTestWorkload(0.25, seed)
+        val topology = createTopology("double")
+        val workload = createTestWorkload(0.25, seed).take(1)
         val monitor = monitor
+
+        for (entry in workload.sortedBy { it.startTime }) {
+            println(entry.startTime.toEpochMilli().toStr() + " "
+            + (entry.stopTime.toEpochMilli() - entry.startTime.toEpochMilli()) + " "
+            + entry.cpuCount)
+        }
 
         Provisioner(coroutineContext, clock, seed).use { provisioner ->
             provisioner.runSteps(
@@ -80,7 +82,9 @@ class CloudUptimeArchive {
 
             val service = provisioner.registry.resolve("compute.opendc.org", ComputeService::class.java)!!
             service.replay(clock, workload, seed, failureModel = cloudUptimeArchive("instagram", Duration.ofDays(7)))
+//            service.replay(clock, workload, seed, failureModel = grid5000(Duration.ofDays(7)))
         }
+        println(monitor.downtime)
 
         // Note that these values have been verified beforehand
         assertAll(
@@ -129,6 +133,7 @@ class CloudUptimeArchive {
         var lostTime = 0L
         var energyUsage = 0.0
         var uptime = 0L
+        var downtime = 0L
 
         override fun record(reader: HostTableReader) {
             idleTime += reader.cpuIdleTime
@@ -137,6 +142,7 @@ class CloudUptimeArchive {
             lostTime += reader.cpuLostTime
             energyUsage += reader.powerTotal
             uptime += reader.uptime
+            downtime += reader.downtime
         }
     }
 }
