@@ -64,3 +64,5 @@ include(":opendc-trace:opendc-trace-calcite")
 include(":opendc-trace:opendc-trace-tools")
 
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
+include(":opendc-storage")
+include(":opendc-storage:opendc-distributed-cache")
