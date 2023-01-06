@@ -2,7 +2,10 @@ package org.opendc.storage.cache
 
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Semaphore
 import org.apache.commons.collections4.map.LRUMap
 import java.time.InstantSource
 
@@ -25,18 +28,26 @@ class CacheHost(
 
     val cache = LRUMap<Long, Boolean>(numCacheSlots, numCacheSlots)
 
-    var freeProcessingSlots = numProcessingSlots
+    val freeProcessingSlots = Semaphore(numProcessingSlots)
 
-    suspend fun scheduleNextTask() {
-        val nextTask = scheduler.getNextTask(this)
-        if (nextTask != null) {
-            runTask(nextTask)
-        }
+    val completedTaskFlow: Flow<CacheTask>
+
+    init {
+        completedTaskFlow = flow {
+            var task = scheduler.getNextTask(this@CacheHost)
+            while (task != null) {
+                freeProcessingSlots.acquire()
+                runTask(task)
+                freeProcessingSlots.release()
+                emit(task)
+                task = scheduler.getNextTask(this@CacheHost)
+            }
+        }.buffer() // Buffer is necessary.
+        // Or the flow code will be called each time its consumed.
     }
 
     suspend fun runTask(task: CacheTask) = coroutineScope {
         task.startTime = clock.millis()
-        freeProcessingSlots -= 1
         var storageDelay = 0L
         val objInCache = cache[task.objectId]
         if (objInCache == null) {
@@ -47,22 +58,5 @@ class CacheHost(
         delay(task.duration + storageDelay)
         task.endTime = clock.millis()
         task.storageDelay = storageDelay
-        freeProcessingSlots += 1
-
-        launch {
-            scheduleNextTask()
-        }
     }
 }
-
-data class CacheTask(
-    val taskId: Long,
-    val objectId: Long,
-    val duration: Long,
-    val submitTime: Long,
-    var startTime: Long,
-    var endTime: Long,
-    var isHit: Boolean = true,
-    var hostId: Int,
-    var storageDelay: Long,
-)

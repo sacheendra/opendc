@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.ir.backend.js.compile
+
 /*
  * Copyright (c) 2023 AtLarge Research
  *
@@ -24,11 +26,13 @@ description = "Library for simulating distributed cache workloads"
 
 plugins {
     `kotlin-conventions`
+    kotlin("plugin.serialization") version "1.7.20"
 }
 
 dependencies {
     api(projects.opendcSimulator.opendcSimulatorFlow)
     implementation(projects.opendcSimulator.opendcSimulatorCore)
+    implementation(projects.opendcTrace.opendcTraceParquet)
 
     implementation(libs.commons.math3)
     implementation(libs.commons.collections4)
