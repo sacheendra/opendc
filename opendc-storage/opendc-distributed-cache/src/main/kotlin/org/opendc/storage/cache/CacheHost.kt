@@ -30,20 +30,14 @@ class CacheHost(
 
     val freeProcessingSlots = Semaphore(numProcessingSlots)
 
-    val completedTaskFlow: Flow<CacheTask>
-
-    init {
-        completedTaskFlow = flow {
-            var task = scheduler.getNextTask(this@CacheHost)
-            while (task != null) {
-                freeProcessingSlots.acquire()
-                runTask(task)
-                freeProcessingSlots.release()
-                emit(task)
-                task = scheduler.getNextTask(this@CacheHost)
-            }
-        }.buffer() // Buffer is necessary.
-        // Or the flow code will be called each time its consumed.
+    suspend fun nextTask(): CacheTask? {
+        val task = scheduler.getNextTask(this@CacheHost)
+        if (task != null) {
+            freeProcessingSlots.acquire()
+            runTask(task)
+            freeProcessingSlots.release()
+        }
+        return task
     }
 
     suspend fun runTask(task: CacheTask) = coroutineScope {
