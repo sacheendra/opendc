@@ -1,10 +1,13 @@
 package org.opendc.storage.cache
 
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import org.apache.commons.collections4.map.LRUMap
 import java.time.InstantSource
@@ -30,14 +33,20 @@ class CacheHost(
 
     val freeProcessingSlots = Semaphore(numProcessingSlots)
 
-    suspend fun nextTask(): CacheTask? {
-        val task = scheduler.getNextTask(this@CacheHost)
-        if (task != null) {
+    suspend fun processTasks(channel: SendChannel<CacheTask>) = coroutineScope {
+        while(true) {
             freeProcessingSlots.acquire()
-            runTask(task)
-            freeProcessingSlots.release()
+            val task = scheduler.getNextTask(this@CacheHost)
+            if (task != null) {
+                launch {
+                    runTask(task)
+                    freeProcessingSlots.release()
+                    channel.send(task)
+                }
+            } else {
+                break
+            }
         }
-        return task
     }
 
     suspend fun runTask(task: CacheTask) = coroutineScope {

@@ -43,6 +43,7 @@ class Autoscaler(val period: Duration,
         val submitRate = currentSubmitRate().toDouble()
         val potentialRate = potentialServiceRate().toDouble()
 
+//        val incomingRatio = submitRate / maxOf(potentialRate, 0.1)
         val incomingRatio = submitRate / maxOf(serviceRate, 0.1)
 //        println("${incomingRatio} ${submitRate} ${serviceRate}")
         var newPotentialRateDelta = 0.0
@@ -50,6 +51,7 @@ class Autoscaler(val period: Duration,
         if (incomingRatio > 0.9) {
             // scale up
             // With an incoming ratio of 0.9, this gives us a new minimum service rate of 1.1*serviceRate
+//            newPotentialRateDelta = submitRate - potentialRate + (0.2*submitRate)
             newPotentialRateDelta = submitRate - serviceRate + (0.2*submitRate)
         } else {
             // is less than 70% of capacity being used

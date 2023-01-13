@@ -39,7 +39,7 @@ fun main(args: Array<String>) {
         val rs = RemoteStorage()
 
         // Setup metrics recorder
-        val resultWritePath = Paths.get("storagesimout/test_results.parquet")
+        val resultWritePath = Paths.get("storagesimout/test_results_40static_faststeal.parquet")
         val resultWriter = LocalParquetWriter.builder(resultWritePath, CacheTaskWriteSupport())
             .withCompressionCodec(CompressionCodecName.SNAPPY)
             .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
@@ -49,9 +49,9 @@ fun main(args: Array<String>) {
         val scheduler = TaskScheduler()
 
         // Setup hosts
-        val numHosts = 10
+        val numHosts = 40
         val addHostsFlow = (fun() {
-            (0 until numHosts)
+            (1..numHosts)
                 .map { CacheHost(4, 100, timeSource, rs, scheduler) }
                 .onEach {
                     launch {
@@ -61,12 +61,12 @@ fun main(args: Array<String>) {
         }).asFlow()
 
         // Setup autoscaler
-        val autoscaler = Autoscaler(60.seconds, timeSource, rs, scheduler)
+//        val autoscaler = Autoscaler(60.seconds, timeSource, rs, scheduler)
 
         // Write results for completed tasks
         val writeTaskFlow = scheduler.completedTaskFlow
             .onEach {
-                autoscaler.recordCompletion(it)
+//                autoscaler.recordCompletion(it)
                 resultWriter.write(it)
             }
             .onCompletion {
@@ -89,21 +89,22 @@ fun main(args: Array<String>) {
                 lastTask = it
                 launch {
                     delay(maxOf( it.submitTime - currentTime, 1))
-                    autoscaler.recordSubmission(it)
+//                    autoscaler.recordSubmission(it)
                     scheduler.offerTask(it)
                 }
             }
             .onCompletion {
                 delay(lastTask!!.submitTime - currentTime + 1000)
+
                 scheduler.complete()
-                autoscaler.complete()
+//                autoscaler.complete()
             }
 
 
 
         // Start execution
         // No simulation runs till we call this
-        listOf(addHostsFlow, inputFlow, writeTaskFlow, autoscaler.autoscalerFlow).merge().collect()
+        listOf(addHostsFlow, inputFlow, writeTaskFlow).merge().collect()
     }
     val end = System.currentTimeMillis()
     println((end - start) / 1000.0)

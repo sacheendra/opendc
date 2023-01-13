@@ -22,6 +22,7 @@ data class CacheTask(
     val objectId: Long,
     val duration: Long,
     val submitTime: Long,
+    var stolen: Boolean = false,
     var startTime: Long = -1,
     var endTime: Long = -1,
     var isHit: Boolean = true,
@@ -66,25 +67,29 @@ class CacheTaskWriteSupport : WriteSupport<CacheTask>() {
         consumer.addLong(record.submitTime)
         consumer.endField("submitTime", 3)
 
-        consumer.startField("startTime", 4)
+        consumer.startField("stolen", 4)
+        consumer.addBoolean(record.stolen)
+        consumer.endField("stolen", 4)
+
+        consumer.startField("startTime", 5)
         consumer.addLong(record.startTime)
-        consumer.endField("startTime", 4)
+        consumer.endField("startTime", 5)
 
-        consumer.startField("endTime", 5)
+        consumer.startField("endTime", 6)
         consumer.addLong(record.endTime)
-        consumer.endField("endTime", 5)
+        consumer.endField("endTime", 6)
 
-        consumer.startField("isHit", 6)
+        consumer.startField("isHit", 7)
         consumer.addBoolean(record.isHit)
-        consumer.endField("isHit", 6)
+        consumer.endField("isHit", 7)
 
-        consumer.startField("hostId", 7)
+        consumer.startField("hostId", 8)
         consumer.addInteger(record.hostId)
-        consumer.endField("hostId", 7)
+        consumer.endField("hostId", 8)
 
-        consumer.startField("storageDelay", 8)
+        consumer.startField("storageDelay", 9)
         consumer.addLong(record.storageDelay)
-        consumer.endField("storageDelay", 8)
+        consumer.endField("storageDelay", 9)
 
         consumer.endMessage()
     }
@@ -108,6 +113,9 @@ class CacheTaskWriteSupport : WriteSupport<CacheTask>() {
                 Types
                     .required(PrimitiveType.PrimitiveTypeName.INT64)
                     .named("submitTime"),
+                Types
+                    .required(PrimitiveType.PrimitiveTypeName.BOOLEAN)
+                    .named("stolen"),
                 Types
                     .required(PrimitiveType.PrimitiveTypeName.INT64)
                     .named("startTime"),
