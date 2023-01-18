@@ -1,11 +1,13 @@
 package org.opendc.storage.cache
 
+import ch.supsi.dti.isin.consistenthash.ConsistentHash
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.launch
 
 class TaskScheduler(
-    val stealWork: Boolean = true
+    val stealWork: Boolean = true,
+    val nodeSelector: ConsistentHash
 ) {
     val hosts = ArrayList<CacheHost>()
     val hostQueues = HashMap<Int, ChannelQueue>()
@@ -25,14 +27,18 @@ class TaskScheduler(
         }
     }
 
-    suspend fun addHost(host: CacheHost) {
-        hosts.add(host)
-        hostQueues[host.hostId] = ChannelQueue()
-        newHostsChannel.send(host)
+    suspend fun addHosts(toAdd: List<CacheHost>) {
+        hosts.addAll(toAdd)
+        nodeSelector.addNodes(toAdd)
+        for (host in toAdd) {
+            hostQueues[host.hostId] = ChannelQueue()
+            newHostsChannel.send(host)
+        }
     }
 
     fun removeHosts(toRemove: List<CacheHost>) {
         hosts.removeAll(toRemove)
+        nodeSelector.removeNodes(toRemove)
         toRemove.forEach {
             // NEED TO RESCHEDULE TASKS AFTER REMOVING HOSTS
             // collect and reoffer tasks
@@ -47,9 +53,7 @@ class TaskScheduler(
         if (result.isFailure && !result.isClosed) {
             if (stealWork) {
                 // Work steal
-//                val queuesToCheck = (1..2).map { hostQueues.values.random() }
                 val chosenQueue = hostQueues.values.maxWith{a, b -> a.size - b.size}
-//                println(chosenQueue.size)
                 if (chosenQueue.size > 5) {
                     val task = chosenQueue.c.receive()
                     chosenQueue.size--
@@ -76,10 +80,9 @@ class TaskScheduler(
 
     suspend fun offerTask(task: CacheTask) {
         // Decide host
-        val chosenHostIndex = task.objectId % hosts.size
-        val chosenHost = hosts[chosenHostIndex.toInt()]
-        val queue = hostQueues[chosenHost.hostId]!!
-        task.hostId = chosenHost.hostId
+        val chosenHostId = nodeSelector.getNode(task.objectId.toString()).name().toInt()
+        val queue = hostQueues[chosenHostId]!!
+        task.hostId = chosenHostId
 
         queue.size++
         queue.c.send(task)

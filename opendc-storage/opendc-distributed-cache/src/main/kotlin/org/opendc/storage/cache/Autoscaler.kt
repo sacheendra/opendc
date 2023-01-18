@@ -20,23 +20,8 @@ import kotlin.time.Duration
 class Autoscaler(val period: Duration,
                  val clock: InstantSource,
                  val remoteStorage: RemoteStorage,
-                 val scheduler: TaskScheduler,) {
-
-    var complete = false
-    val autoscalerFlow: Flow<Unit> = flow<Unit> {
-        delay(period)
-        while (!complete) {
-            emit(Unit)
-            delay(period)
-        }
-    }
-        .onEach {
-            autoscale()
-        }
-
-    fun complete() {
-        complete = true
-    }
+                 val scheduler: TaskScheduler,
+                 val metricRecorder: MetricRecorder) {
 
     suspend fun autoscale() {
         val serviceRate = currentServiceRate().toDouble()
@@ -63,16 +48,12 @@ class Autoscaler(val period: Duration,
         }
         val serverChange = ceil(newPotentialRateDelta/serviceRatePerServer).toInt()
         changeNumServers(serverChange)
-
-        resetMetrics()
     }
 
     suspend fun changeNumServers(serverChange: Int) {
         if (serverChange > 0) {
-            for (i in 0 until serverChange) {
-                val host = CacheHost(4, 100, clock, remoteStorage, scheduler)
-                scheduler.addHost(host)
-            }
+            scheduler.addHosts((1..serverChange)
+                .map { CacheHost(4, 100, clock, remoteStorage, scheduler) })
         } else if (serverChange < 0) {
             if (scheduler.hosts.size == 1) {
                 return
@@ -84,31 +65,16 @@ class Autoscaler(val period: Duration,
     }
 
     val serviceRatePerServer = 4
-    var submittedTaskDurations = ArrayList<Long>(period.inWholeSeconds.toInt() * 150)
-    var completedTaskDurations = ArrayList<Long>(period.inWholeSeconds.toInt() * 150)
-
-    fun recordSubmission(task: CacheTask) {
-        submittedTaskDurations.add(task.duration)
-    }
-
-    fun recordCompletion(task: CacheTask) {
-        completedTaskDurations.add(task.duration)
-    }
-
-    fun resetMetrics() {
-        submittedTaskDurations = ArrayList<Long>(period.inWholeSeconds.toInt() * 150)
-        completedTaskDurations = ArrayList<Long>(period.inWholeSeconds.toInt() * 150)
-    }
 
     fun potentialServiceRate(): Long {
         return scheduler.hosts.size.toLong() * serviceRatePerServer
     }
 
     fun currentSubmitRate(): Long {
-        return submittedTaskDurations.sum() / period.inWholeMilliseconds
+        return metricRecorder.submittedTaskDurations.sum() / period.inWholeMilliseconds
     }
 
     fun currentServiceRate(): Long {
-        return completedTaskDurations.sum() / period.inWholeMilliseconds
+        return metricRecorder.completedTaskDurations.sum() / period.inWholeMilliseconds
     }
 }

@@ -37,5 +37,23 @@ dependencies {
     implementation(libs.commons.math3)
     implementation(libs.commons.collections4)
 
+    implementation(libs.clikt)
+
+    implementation(files("libs/netpar-1.0.0-jar-with-dependencies.jar"))
+
     testImplementation(libs.slf4j.simple)
+}
+
+task("fatJar", type = Jar::class) {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    manifest {
+        attributes["Implementation-Title"] = "OpenDC distributed cache simulator"
+        // Needs the Kt at the end of classname to work
+        // https://kotlinlang.org/docs/java-to-kotlin-interop.html#package-level-functions
+        attributes["Main-Class"] = "org.opendc.storage.cache.DistCacheKt"
+    }
+    val dependencies = configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) }
+    from(dependencies)
+    with(tasks.jar.get())
 }

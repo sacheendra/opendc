@@ -1,5 +1,6 @@
 package org.opendc.storage.cache
 
+import ch.supsi.dti.isin.cluster.Node
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.coroutineScope
@@ -18,7 +19,7 @@ class CacheHost(
     val clock: InstantSource,
     val remoteStorage: RemoteStorage,
     val scheduler: TaskScheduler,
-) {
+) : Node {
 
     companion object {
         var nextHostId: Int = 0
@@ -61,5 +62,9 @@ class CacheHost(
         delay(task.duration + storageDelay)
         task.endTime = clock.millis()
         task.storageDelay = storageDelay
+    }
+
+    override fun name(): String {
+        return hostId.toString()
     }
 }
