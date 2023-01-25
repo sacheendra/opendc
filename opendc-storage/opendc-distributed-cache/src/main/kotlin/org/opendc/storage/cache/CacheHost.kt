@@ -1,13 +1,9 @@
 package org.opendc.storage.cache
 
 import ch.supsi.dti.isin.cluster.Node
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import org.apache.commons.collections4.map.LRUMap
@@ -19,6 +15,7 @@ class CacheHost(
     val clock: InstantSource,
     val remoteStorage: RemoteStorage,
     val scheduler: TaskScheduler,
+    val metricRecorder: MetricRecorder
 ) : Node {
 
     companion object {
@@ -51,6 +48,8 @@ class CacheHost(
     }
 
     suspend fun runTask(task: CacheTask) = coroutineScope {
+        metricRecorder.recordStart(task)
+
         task.startTime = clock.millis()
         var storageDelay = 0L
         val objInCache = cache[task.objectId]
@@ -62,9 +61,16 @@ class CacheHost(
         delay(task.duration + storageDelay)
         task.endTime = clock.millis()
         task.storageDelay = storageDelay
+
+        metricRecorder.recordCompletion(task)
     }
 
     override fun name(): String {
         return hostId.toString()
+    }
+
+    override fun compareTo(other: Node?): Int {
+        other as CacheHost
+        return hostId.compareTo(other.hostId)
     }
 }

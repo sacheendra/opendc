@@ -4,9 +4,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onEach
+import java.time.InstantSource
 import kotlin.time.Duration
 
-class MetricRecorder(val period: Duration) {
+class MetricRecorder(
+    val period: Duration
+) {
 
     val callbacks: MutableCollection<suspend () -> Unit> = mutableListOf()
 
@@ -31,19 +34,26 @@ class MetricRecorder(val period: Duration) {
         callbacks.add(cb)
     }
 
-    var submittedTaskDurations = ArrayList<Long>(10000)
-    var completedTaskDurations = ArrayList<Long>(10000)
+    var submittedTasks = ArrayList<CacheTask>(10000)
+    var inProcess = HashMap<Long, CacheTask>()
+    var completedTasks = ArrayList<CacheTask>(10000)
 
     fun resetMetrics() {
-        submittedTaskDurations = ArrayList<Long>(10000)
-        completedTaskDurations = ArrayList<Long>(10000)
+        submittedTasks = ArrayList(10000)
+        completedTasks = ArrayList(10000)
+
     }
 
     fun recordSubmission(task: CacheTask) {
-        submittedTaskDurations.add(task.duration)
+        submittedTasks.add(task)
+    }
+
+    fun recordStart(task: CacheTask) {
+        inProcess[task.taskId] = task
     }
 
     fun recordCompletion(task: CacheTask) {
-        completedTaskDurations.add(task.duration)
+        completedTasks.add(task)
+        inProcess.remove(task.taskId)
     }
 }

@@ -1,19 +1,6 @@
 package org.opendc.storage.cache
 
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.cancellable
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.launch
 import java.time.InstantSource
-import java.time.Period
 import kotlin.math.ceil
 import kotlin.time.Duration
 
@@ -21,27 +8,39 @@ class Autoscaler(val period: Duration,
                  val clock: InstantSource,
                  val remoteStorage: RemoteStorage,
                  val scheduler: TaskScheduler,
-                 val metricRecorder: MetricRecorder) {
+                 val metricRecorder: MetricRecorder,
+    val watermarks: Pair<Double, Double>
+) {
+
+
+    val lowWatermark = watermarks.first
+    val highWatermark = watermarks.second
 
     suspend fun autoscale() {
-        val serviceRate = currentServiceRate().toDouble()
-        val submitRate = currentSubmitRate().toDouble()
+        val serviceRate = currentServiceRate()
+        val submitRate = currentSubmitRate()
         val potentialRate = potentialServiceRate().toDouble()
 
-//        val incomingRatio = submitRate / maxOf(potentialRate, 0.1)
-        val incomingRatio = submitRate / maxOf(serviceRate, 0.1)
+//        println("$serviceRate $submitRate")
+
+        // Actual service before the first epoch will be low as few tasks were completed
+        val rateToCompare = if (clock.millis() < 1000*60*2) {
+            potentialRate
+        } else {
+            serviceRate
+        }
+        val incomingRatio = submitRate / maxOf(rateToCompare, 0.1)
 //        println("${incomingRatio} ${submitRate} ${serviceRate}")
         var newPotentialRateDelta = 0.0
         // Is more than 90% of capacity being used
-        if (incomingRatio > 0.9) {
+        if (incomingRatio > highWatermark) {
             // scale up
             // With an incoming ratio of 0.9, this gives us a new minimum service rate of 1.1*serviceRate
-//            newPotentialRateDelta = submitRate - potentialRate + (0.2*submitRate)
             newPotentialRateDelta = submitRate - serviceRate + (0.2*submitRate)
         } else {
             // is less than 70% of capacity being used
             val usedFraction = submitRate / potentialRate
-            if (usedFraction < 0.7) {
+            if (usedFraction < lowWatermark) {
                 // scale down
                 newPotentialRateDelta = -(0.8*potentialRate - submitRate)
             }
@@ -53,7 +52,7 @@ class Autoscaler(val period: Duration,
     suspend fun changeNumServers(serverChange: Int) {
         if (serverChange > 0) {
             scheduler.addHosts((1..serverChange)
-                .map { CacheHost(4, 100, clock, remoteStorage, scheduler) })
+                .map { CacheHost(4, 100, clock, remoteStorage, scheduler, metricRecorder) })
         } else if (serverChange < 0) {
             if (scheduler.hosts.size == 1) {
                 return
@@ -70,11 +69,31 @@ class Autoscaler(val period: Duration,
         return scheduler.hosts.size.toLong() * serviceRatePerServer
     }
 
-    fun currentSubmitRate(): Long {
-        return metricRecorder.submittedTaskDurations.sum() / period.inWholeMilliseconds
+    fun currentSubmitRate(): Double {
+        val currentWorkload = metricRecorder.submittedTasks.sumOf {
+            val maxPossibleWorkload = clock.millis() - it.submitTime
+            if (it.duration > maxPossibleWorkload) {
+                maxPossibleWorkload
+            } else {
+                it.duration
+            }
+        }
+
+        return currentWorkload.toDouble() / period.inWholeMilliseconds
     }
 
-    fun currentServiceRate(): Long {
-        return metricRecorder.completedTaskDurations.sum() / period.inWholeMilliseconds
+    fun currentServiceRate(): Double {
+        val currentTime = clock.millis()
+        val epochStart = currentTime - period.inWholeMilliseconds
+        val serviceProvided = metricRecorder.completedTasks.sumOf {
+            it.endTime - maxOf(it.startTime, epochStart)
+        } +
+            metricRecorder.inProcess.values.sumOf {
+                currentTime - maxOf(it.startTime, epochStart)
+            }
+
+//        println(metricRecorder.inProcess.size)
+
+        return serviceProvided.toDouble() / period.inWholeMilliseconds
     }
 }

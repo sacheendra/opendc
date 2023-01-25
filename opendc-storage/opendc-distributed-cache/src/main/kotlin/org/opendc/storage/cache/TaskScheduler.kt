@@ -1,6 +1,8 @@
 package org.opendc.storage.cache
 
+import ch.supsi.dti.isin.cluster.Node
 import ch.supsi.dti.isin.consistenthash.ConsistentHash
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.launch
@@ -27,11 +29,21 @@ class TaskScheduler(
         }
     }
 
+    init {
+        if (nodeSelector is DynamicObjectPlacer) {
+            nodeSelector.registerScheduler(this)
+        }
+    }
+
     suspend fun addHosts(toAdd: List<CacheHost>) {
         hosts.addAll(toAdd)
         nodeSelector.addNodes(toAdd)
         for (host in toAdd) {
-            hostQueues[host.hostId] = ChannelQueue()
+            hostQueues[host.hostId] = ChannelQueue(host)
+        }
+        // Start listening on queue after creating all queues
+        // Otherwise, items may be sent to queues which are not being read
+        for (host in toAdd) {
             newHostsChannel.send(host)
         }
     }
@@ -39,15 +51,28 @@ class TaskScheduler(
     fun removeHosts(toRemove: List<CacheHost>) {
         hosts.removeAll(toRemove)
         nodeSelector.removeNodes(toRemove)
-        toRemove.forEach {
-            // NEED TO RESCHEDULE TASKS AFTER REMOVING HOSTS
-            // collect and reoffer tasks
-            hostQueues[it.hostId]!!.c.close()
+        toRemove.forEach<CacheHost> { host ->
+            // DONE: NEED TO RESCHEDULE TASKS AFTER REMOVING HOSTS
+            // collect and re-offer tasks
+
+            val queue = hostQueues[host.hostId]!!
+            queue.drain = true
+            queue.c.close()
         }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     suspend fun getNextTask(host: CacheHost): CacheTask? {
         val queue = hostQueues[host.hostId]!!
+        // Drain queue on node shut down
+        if (queue.drain) {
+            for (task in queue.c) {
+                this.offerTask(task)
+            }
+            queue.size = 0
+            hostQueues.remove(host.hostId)
+        }
+
         var result = queue.c.tryReceive()
 
         if (result.isFailure && !result.isClosed) {
@@ -66,10 +91,6 @@ class TaskScheduler(
         }
 
         if (result.isClosed) {
-            // Clean up after self after node is stopped
-            // MEMORY LEAK! But, its ok
-            // Do we even need this, we start thousands of nodes at best
-//            hostQueues.remove(host.hostId)
             return null
         }
 
@@ -80,7 +101,8 @@ class TaskScheduler(
 
     suspend fun offerTask(task: CacheTask) {
         // Decide host
-        val chosenHostId = nodeSelector.getNode(task.objectId.toString()).name().toInt()
+        val host = nodeSelector.getNode(task.objectId.toString()) as CacheHost
+        val chosenHostId = host.hostId
         val queue = hostQueues[chosenHostId]!!
         task.hostId = chosenHostId
 
@@ -99,7 +121,45 @@ class TaskScheduler(
     }
 }
 
-class ChannelQueue {
+class ChannelQueue(h: CacheHost) {
     val c: Channel<CacheTask> = Channel(1000)
     var size: Int = 0
+    var drain: Boolean = false
+    val host: CacheHost = h
+}
+
+interface DynamicObjectPlacer {
+    fun registerScheduler(scheduler: TaskScheduler)
+}
+
+class GreedyObjectPlacer: ConsistentHash, DynamicObjectPlacer {
+
+    lateinit var scheduler: TaskScheduler
+    override fun getNode(key: String?): Node {
+        val shortestQueue = scheduler.hostQueues
+            .filter { !it.value.drain } // Filter our closed nodes
+            .minBy { it.value.size }
+        return shortestQueue.value.host
+    }
+
+    override fun addNodes(nodes: MutableCollection<out Node>?) {
+        return
+    }
+
+    override fun removeNodes(nodes: MutableCollection<out Node>?) {
+        return
+    }
+
+    override fun nodeCount(): Int {
+        return 0
+    }
+
+    override fun engine(): Any? {
+        return null
+    }
+
+    override fun registerScheduler(scheduler: TaskScheduler) {
+        this.scheduler = scheduler
+    }
+
 }

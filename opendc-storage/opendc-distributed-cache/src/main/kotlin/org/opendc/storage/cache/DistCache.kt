@@ -5,9 +5,11 @@ import ch.supsi.dti.isin.consistenthash.ConsistentHash
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.default
+import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
-import com.github.ajalt.clikt.parameters.types.int
+import com.github.ajalt.clikt.parameters.options.pair
+import com.github.ajalt.clikt.parameters.types.double
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
@@ -33,6 +35,7 @@ class DistCache : CliktCommand() {
     val placementAlgo: String by argument(help="Object placement algorithm")
     // Autoscaler options
     val autoscalerEnabled: Boolean by option().flag(default=false)
+    val watermarks: Pair<Double, Double> by option().double().pair().default(Pair(0.6, 0.9))
     // Work stealing options
     val workstealEnabled: Boolean by option().flag(default=false)
     // Indirection based load balancing options
@@ -54,25 +57,24 @@ class DistCache : CliktCommand() {
                 .build()
             val metricRecorder = MetricRecorder(60.seconds)
 
+            val numHosts = 11
             // Setup scheduler
-            val objectPlacer = mapPlacementAlgoName(placementAlgo)
+            val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10)
             val scheduler = TaskScheduler(workstealEnabled, objectPlacer)
 
             // Setup hosts
-            val numHosts = 11
             val addHostsFlow = flow {
                 scheduler.addHosts((1..numHosts)
-                    .map { CacheHost(4, 100, timeSource, rs, scheduler) })
+                    .map { CacheHost(4, 100, timeSource, rs, scheduler, metricRecorder) })
                 emit(Unit)
             }
 
             // Setup autoscaler
-            val autoscaler = Autoscaler(60.seconds, timeSource, rs, scheduler, metricRecorder)
+            val autoscaler = Autoscaler(60.seconds, timeSource, rs, scheduler, metricRecorder, watermarks)
 
             // Write results for completed tasks
             val writeTaskFlow = scheduler.completedTaskFlow
                 .onEach {
-                    metricRecorder.recordCompletion(it)
                     resultWriter.write(it)
                 }
                 .onCompletion {
@@ -118,22 +120,29 @@ class DistCache : CliktCommand() {
         }
         val end = System.currentTimeMillis()
         println((end - start) / 1000.0)
+        println("OK!")
     }
 
-    fun mapPlacementAlgoName(name: String): ConsistentHash {
+    fun mapPlacementAlgoName(name: String, size: Int): ConsistentHash {
+        if (name == "greedy") {
+            return GreedyObjectPlacer()
+        }
+
         val algo: ConsistentHash.Algorithm = when(name) {
             "ring" -> ConsistentHash.Algorithm.RING_HASH
             "rendezvous" -> ConsistentHash.Algorithm.RENDEZVOUS_HASH
             "maglev" -> ConsistentHash.Algorithm.MAGLEV_HASH
-            "jump" -> ConsistentHash.Algorithm.JUMP_HASH
+//            "jump" -> ConsistentHash.Algorithm.JUMP_HASH
+            "multiprobe" -> ConsistentHash.Algorithm.MULTIPROBE_HASH
             "dx" -> ConsistentHash.Algorithm.DX_HASH
             "anchor" -> ConsistentHash.Algorithm.ANCHOR_HASH
             // Beamer is missing
+            // Maybe other centralized stuff
             else -> {
                 throw IllegalArgumentException("Unknown placement algo name: ${name}")
             }
         }
 
-        return ConsistentHash.create(algo, ConsistentHash.DEFAULT_HASH_ALGOTITHM)
+        return ConsistentHash.create(algo, ConsistentHash.DEFAULT_HASH_ALGOTITHM, size)
     }
 }
