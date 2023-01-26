@@ -21,6 +21,8 @@ import kotlinx.coroutines.launch
 import org.apache.parquet.hadoop.ParquetFileWriter
 import org.apache.parquet.hadoop.metadata.CompressionCodecName
 import org.opendc.simulator.kotlin.runSimulation
+import org.opendc.storage.cache.schedulers.GreedyObjectPlacer
+import org.opendc.storage.cache.schedulers.RandomObjectPlacer
 import org.opendc.trace.util.parquet.LocalParquetReader
 import org.opendc.trace.util.parquet.LocalParquetWriter
 import java.nio.file.Paths
@@ -104,8 +106,9 @@ class DistCache : CliktCommand() {
                 .onCompletion {
                     delay(lastTask!!.submitTime - currentTime + 1000)
 
-                    scheduler.complete()
+                    // Need to stop timed events like autoscaling before the scheduler
                     metricRecorder.complete()
+                    scheduler.complete()
                 }
 
 
@@ -126,7 +129,12 @@ class DistCache : CliktCommand() {
     fun mapPlacementAlgoName(name: String, size: Int): ConsistentHash {
         if (name == "greedy") {
             return GreedyObjectPlacer()
+        } else if (name == "random") {
+            return RandomObjectPlacer()
         }
+
+        // Beamer is missing
+        // Maybe other centralized stuff
 
         val algo: ConsistentHash.Algorithm = when(name) {
             "ring" -> ConsistentHash.Algorithm.RING_HASH
@@ -136,8 +144,6 @@ class DistCache : CliktCommand() {
             "multiprobe" -> ConsistentHash.Algorithm.MULTIPROBE_HASH
             "dx" -> ConsistentHash.Algorithm.DX_HASH
             "anchor" -> ConsistentHash.Algorithm.ANCHOR_HASH
-            // Beamer is missing
-            // Maybe other centralized stuff
             else -> {
                 throw IllegalArgumentException("Unknown placement algo name: ${name}")
             }

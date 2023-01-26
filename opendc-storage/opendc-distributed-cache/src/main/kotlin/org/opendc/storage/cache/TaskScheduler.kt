@@ -6,6 +6,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.launch
+import org.opendc.storage.cache.schedulers.DynamicObjectPlacer
+import kotlin.system.exitProcess
 
 class TaskScheduler(
     val stealWork: Boolean = true,
@@ -54,7 +56,7 @@ class TaskScheduler(
         toRemove.forEach<CacheHost> { host ->
             // DONE: NEED TO RESCHEDULE TASKS AFTER REMOVING HOSTS
             // collect and re-offer tasks
-
+//            println("closed ${host.hostId}")
             val queue = hostQueues[host.hostId]!!
             queue.drain = true
             queue.c.close()
@@ -71,6 +73,7 @@ class TaskScheduler(
             }
             queue.size = 0
             hostQueues.remove(host.hostId)
+            return null
         }
 
         var result = queue.c.tryReceive()
@@ -78,7 +81,9 @@ class TaskScheduler(
         if (result.isFailure && !result.isClosed) {
             if (stealWork) {
                 // Work steal
-                val chosenQueue = hostQueues.values.maxWith{a, b -> a.size - b.size}
+                val chosenQueue = hostQueues.values
+                    .filter { !it.drain } // Filter our closed nodes
+                    .maxWith{a, b -> a.size - b.size}
                 if (chosenQueue.size > 5) {
                     val task = chosenQueue.c.receive()
                     chosenQueue.size--
@@ -104,17 +109,28 @@ class TaskScheduler(
         val host = nodeSelector.getNode(task.objectId.toString()) as CacheHost
         val chosenHostId = host.hostId
         val queue = hostQueues[chosenHostId]!!
+
+        val oldHostId = task.hostId
         task.hostId = chosenHostId
 
         queue.size++
-        queue.c.send(task)
+        val res = queue.c.trySend(task)
+        if (res.isFailure) {
+            println(res.isClosed)
+            println(queue.size)
+            println(hosts.size)
+            for (host in hosts) {
+                println(hostQueues[host.hostId]!!.size)
+            }
+            println("failed send sourcehost: $oldHostId targethost: $chosenHostId drain: ${queue.drain}")
+            exitProcess(1)
+        }
+
     }
 
     fun complete() {
-        synchronized(hostQueues) {
-            for (h in hostQueues) {
-                h.value.c.close()
-            }
+        for (h in hostQueues) {
+            h.value.c.close()
         }
 
         newHostsChannel.close()
@@ -122,44 +138,8 @@ class TaskScheduler(
 }
 
 class ChannelQueue(h: CacheHost) {
-    val c: Channel<CacheTask> = Channel(1000)
+    val c: Channel<CacheTask> = Channel(Channel.UNLIMITED)
     var size: Int = 0
     var drain: Boolean = false
     val host: CacheHost = h
-}
-
-interface DynamicObjectPlacer {
-    fun registerScheduler(scheduler: TaskScheduler)
-}
-
-class GreedyObjectPlacer: ConsistentHash, DynamicObjectPlacer {
-
-    lateinit var scheduler: TaskScheduler
-    override fun getNode(key: String?): Node {
-        val shortestQueue = scheduler.hostQueues
-            .filter { !it.value.drain } // Filter our closed nodes
-            .minBy { it.value.size }
-        return shortestQueue.value.host
-    }
-
-    override fun addNodes(nodes: MutableCollection<out Node>?) {
-        return
-    }
-
-    override fun removeNodes(nodes: MutableCollection<out Node>?) {
-        return
-    }
-
-    override fun nodeCount(): Int {
-        return 0
-    }
-
-    override fun engine(): Any? {
-        return null
-    }
-
-    override fun registerScheduler(scheduler: TaskScheduler) {
-        this.scheduler = scheduler
-    }
-
 }
