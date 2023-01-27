@@ -50,29 +50,33 @@ class TaskScheduler(
         }
     }
 
-    fun removeHosts(toRemove: List<CacheHost>) {
+    suspend fun removeHosts(toRemove: List<CacheHost>) {
         hosts.removeAll(toRemove)
         nodeSelector.removeNodes(toRemove)
-        toRemove.forEach<CacheHost> { host ->
+        val queuesToDrain = toRemove.map { host ->
             // DONE: NEED TO RESCHEDULE TASKS AFTER REMOVING HOSTS
             // collect and re-offer tasks
 //            println("closed ${host.hostId}")
             val queue = hostQueues[host.hostId]!!
-            queue.drain = true
             queue.c.close()
+            hostQueues.remove(host.hostId)!!
+        }
+
+        // Drain queues after they have been removed
+        queuesToDrain.forEach { queue ->
+            // Drain queue on node shut down
+            for (task in queue.c) {
+                this.offerTask(task)
+            }
+            queue.size = 0
         }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     suspend fun getNextTask(host: CacheHost): CacheTask? {
-        val queue = hostQueues[host.hostId]!!
-        // Drain queue on node shut down
-        if (queue.drain) {
-            for (task in queue.c) {
-                this.offerTask(task)
-            }
-            queue.size = 0
-            hostQueues.remove(host.hostId)
+        val queue = hostQueues[host.hostId]
+        if (queue == null) {
+            // This means the node has been deleted
             return null
         }
 
@@ -82,7 +86,6 @@ class TaskScheduler(
             if (stealWork) {
                 // Work steal
                 val chosenQueue = hostQueues.values
-                    .filter { !it.drain } // Filter our closed nodes
                     .maxWith{a, b -> a.size - b.size}
                 if (chosenQueue.size > 5) {
                     val task = chosenQueue.c.receive()
@@ -119,10 +122,10 @@ class TaskScheduler(
             println(res.isClosed)
             println(queue.size)
             println(hosts.size)
-            for (host in hosts) {
-                println(hostQueues[host.hostId]!!.size)
+            for (h in hosts) {
+                println(hostQueues[h.hostId]!!.size)
             }
-            println("failed send sourcehost: $oldHostId targethost: $chosenHostId drain: ${queue.drain}")
+            println("failed send sourcehost: $oldHostId targethost: $chosenHostId")
             exitProcess(1)
         }
 
@@ -140,6 +143,5 @@ class TaskScheduler(
 class ChannelQueue(h: CacheHost) {
     val c: Channel<CacheTask> = Channel(Channel.UNLIMITED)
     var size: Int = 0
-    var drain: Boolean = false
     val host: CacheHost = h
 }

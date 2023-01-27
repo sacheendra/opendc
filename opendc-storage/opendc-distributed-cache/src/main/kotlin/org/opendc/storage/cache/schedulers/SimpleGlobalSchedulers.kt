@@ -13,7 +13,6 @@ class GreedyObjectPlacer: ConsistentHash, DynamicObjectPlacer {
     lateinit var scheduler: TaskScheduler
     override fun getNode(key: String?): Node {
         val shortestQueue = scheduler.hostQueues.values
-            .filter { !it.drain } // Filter our closed nodes
             .minBy { it.size }
         return shortestQueue.host
     }
