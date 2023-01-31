@@ -34,22 +34,22 @@ class MetricRecorder(
         callbacks.add(cb)
     }
 
-    var submittedTasks = ArrayList<CacheTask>(10000)
-    var inProcess = HashMap<Long, CacheTask>()
+    val queuedTasks = HashMap<Long, CacheTask>()
+    val inProcess = HashMap<Long, CacheTask>()
     var completedTasks = ArrayList<CacheTask>(10000)
 
     fun resetMetrics() {
-        submittedTasks = ArrayList(10000)
         completedTasks = ArrayList(10000)
 
     }
 
     fun recordSubmission(task: CacheTask) {
-        submittedTasks.add(task)
+        queuedTasks[task.taskId] = task
     }
 
     fun recordStart(task: CacheTask) {
         inProcess[task.taskId] = task
+        queuedTasks.remove(task.taskId)
     }
 
     fun recordCompletion(task: CacheTask) {

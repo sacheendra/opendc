@@ -6,7 +6,10 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.yield
 import org.opendc.storage.cache.schedulers.DynamicObjectPlacer
+import java.util.PriorityQueue
 import kotlin.system.exitProcess
 
 class TaskScheduler(
@@ -58,52 +61,43 @@ class TaskScheduler(
             // collect and re-offer tasks
 //            println("closed ${host.hostId}")
             val queue = hostQueues[host.hostId]!!
-            queue.c.close()
+            queue.closed = true
             hostQueues.remove(host.hostId)!!
         }
 
         // Drain queues after they have been removed
         queuesToDrain.forEach { queue ->
             // Drain queue on node shut down
-            for (task in queue.c) {
+            for (task in queue.q) {
                 this.offerTask(task)
             }
-            queue.size = 0
         }
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
     suspend fun getNextTask(host: CacheHost): CacheTask? {
         val queue = hostQueues[host.hostId]
-        if (queue == null) {
-            // This means the node has been deleted
-            return null
-        }
+        if (queue == null) return null // This means the node has been deleted
 
-        var result = queue.c.tryReceive()
+        if (queue.closed) return null
 
-        if (result.isFailure && !result.isClosed) {
+        var task = queue.next()
+
+        if (task == null) {
             if (stealWork) {
                 // Work steal
                 val chosenQueue = hostQueues.values
-                    .maxWith{a, b -> a.size - b.size}
-                if (chosenQueue.size > 5) {
-                    val task = chosenQueue.c.receive()
-                    chosenQueue.size--
+                    .maxWith{a, b -> a.q.size - b.q.size}
+                if (chosenQueue.q.size > 5) {
+                    val task = chosenQueue.next()!!
                     task.stolen = true
                     return task
                 }
             }
 
-            result = queue.c.receiveCatching()
+            queue.wait()
+            task = queue.next()
         }
 
-        if (result.isClosed) {
-            return null
-        }
-
-        queue.size--
-        val task = result.getOrThrow()
         return task
     }
 
@@ -116,24 +110,24 @@ class TaskScheduler(
         val oldHostId = task.hostId
         task.hostId = chosenHostId
 
-        queue.size++
-        val res = queue.c.trySend(task)
-        if (res.isFailure) {
-            println(res.isClosed)
-            println(queue.size)
-            println(hosts.size)
-            for (h in hosts) {
-                println(hostQueues[h.hostId]!!.size)
-            }
-            println("failed send sourcehost: $oldHostId targethost: $chosenHostId")
-            exitProcess(1)
-        }
+        queue.q.add(task)
+        queue.pleaseNotify()
+//        if (res.isFailure) {
+//            println(res.isClosed)
+//            println(queue.size)
+//            println(hosts.size)
+//            for (h in hosts) {
+//                println(hostQueues[h.hostId]!!.size)
+//            }
+//            println("failed send sourcehost: $oldHostId targethost: $chosenHostId")
+//            exitProcess(1)
+//        }
 
     }
 
     fun complete() {
-        for (h in hostQueues) {
-            h.value.c.close()
+        for (queue in hostQueues.values) {
+            queue.closed = true
         }
 
         newHostsChannel.close()
@@ -141,7 +135,30 @@ class TaskScheduler(
 }
 
 class ChannelQueue(h: CacheHost) {
-    val c: Channel<CacheTask> = Channel(Channel.UNLIMITED)
-    var size: Int = 0
+//    val c: Channel<CacheTask> = Channel(Channel.UNLIMITED)
+    val q: PriorityQueue<CacheTask> = PriorityQueue { a, b -> (a.submitTime - b.submitTime).toInt() }
+    private val notifier: Mutex = Mutex()
+    var closed: Boolean = false
+        set(value) {
+            field = value
+            if (notifier.isLocked) notifier.unlock()
+        }
     val host: CacheHost = h
+
+    fun next(): CacheTask? {
+        return if (q.size > 0) {
+            q.remove()
+        } else null
+    }
+
+    suspend fun wait() {
+        notifier.lock()
+        // After locking wait for sender to unlock it
+        notifier.lock()
+        notifier.unlock()
+    }
+
+    fun pleaseNotify() {
+        if (notifier.isLocked) notifier.unlock()
+    }
 }

@@ -9,7 +9,9 @@ import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.pair
+import com.github.ajalt.clikt.parameters.options.triple
 import com.github.ajalt.clikt.parameters.types.double
+import com.github.ajalt.clikt.parameters.types.long
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
@@ -17,6 +19,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import org.apache.parquet.hadoop.ParquetFileWriter
 import org.apache.parquet.hadoop.metadata.CompressionCodecName
@@ -27,6 +30,7 @@ import org.opendc.trace.util.parquet.LocalParquetReader
 import org.opendc.trace.util.parquet.LocalParquetWriter
 import java.nio.file.Paths
 import kotlin.IllegalArgumentException
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 fun main(args: Array<String>) = DistCache().main(args)
@@ -38,6 +42,8 @@ class DistCache : CliktCommand() {
     // Autoscaler options
     val autoscalerEnabled: Boolean by option().flag(default=false)
     val watermarks: Pair<Double, Double> by option().double().pair().default(Pair(0.6, 0.9))
+    val manualscalerEnabled: Boolean by option().flag(default=false)
+    val manualOptions: Triple<Long, Long, Long> by option().long().triple().default(Triple(4000000, 5, 10))
     // Work stealing options
     val workstealEnabled: Boolean by option().flag(default=false)
     // Indirection based load balancing options
@@ -57,9 +63,17 @@ class DistCache : CliktCommand() {
                 .withCompressionCodec(CompressionCodecName.SNAPPY)
                 .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
                 .build()
-            val metricRecorder = MetricRecorder(60.seconds)
+//            val metricRecorder = MetricRecorder(60.seconds)
+            val scalingPeriod = 5.minutes
+            val metricRecorder = MetricRecorder(scalingPeriod)
 
-            val numHosts = 11
+            val warmupDelay = 1000*100000
+
+            val numHosts = if (manualscalerEnabled) {
+                manualOptions.second.toInt()
+            } else {
+                11
+            }
             // Setup scheduler
             val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10)
             val scheduler = TaskScheduler(workstealEnabled, objectPlacer)
@@ -72,12 +86,17 @@ class DistCache : CliktCommand() {
             }
 
             // Setup autoscaler
-            val autoscaler = Autoscaler(60.seconds, timeSource, rs, scheduler, metricRecorder, watermarks)
+            val autoscaler = Autoscaler(timeSource, rs, scheduler, metricRecorder, watermarks)
+            val manualScaler = ManualScaler(manualOptions.first + warmupDelay, manualOptions.third, scheduler, timeSource, rs, metricRecorder)
 
             // Write results for completed tasks
             val writeTaskFlow = scheduler.completedTaskFlow
                 .onEach {
-                    resultWriter.write(it)
+                    if (it.startTime > warmupDelay) {
+                        it.startTime = it.startTime - warmupDelay
+                        it.endTime = it.endTime - warmupDelay
+                        resultWriter.write(it)
+                    }
                 }
                 .onCompletion {
                     resultWriter.close()
@@ -85,7 +104,23 @@ class DistCache : CliktCommand() {
 
             // Load trace
             val traceReadPath = Paths.get(inputFile)
+            val warmupReader = LocalParquetReader(traceReadPath, CacheTaskReadSupport(), false)
             val traceReader = LocalParquetReader(traceReadPath, CacheTaskReadSupport(), false)
+
+            val warmupFlow = flow {
+                while (true) {
+                    val task = warmupReader.read()
+                    if (task != null) emit(task)
+                    else break
+                }
+            }
+                .onEach {
+                    launch {
+                        delay(maxOf(it.submitTime - currentTime, 1))
+                        metricRecorder.recordSubmission(it)
+                        scheduler.offerTask(it)
+                    }
+                }.take(8000*120)
 
             var lastTask: CacheTask? = null
             val inputFlow = flow {
@@ -98,13 +133,13 @@ class DistCache : CliktCommand() {
                 .onEach {
                     lastTask = it
                     launch {
-                        delay(maxOf(it.submitTime - currentTime, 1))
+                        delay(maxOf(it.submitTime - currentTime, 1) + warmupDelay)
                         metricRecorder.recordSubmission(it)
                         scheduler.offerTask(it)
                     }
                 }
                 .onCompletion {
-                    delay(lastTask!!.submitTime - currentTime + 1000)
+                    delay(lastTask!!.submitTime - currentTime + 1000 + warmupDelay)
 
                     // Need to stop timed events like autoscaling before the scheduler
                     metricRecorder.complete()
@@ -114,10 +149,12 @@ class DistCache : CliktCommand() {
 
             // Start execution
             // No simulation runs till we call this
-            val allFlows = mutableListOf(addHostsFlow, inputFlow, writeTaskFlow,
+            val allFlows = mutableListOf(addHostsFlow, warmupFlow, inputFlow, writeTaskFlow,
                 metricRecorder.metricsFlow)
             if (autoscalerEnabled)
                 metricRecorder.addCallback{ autoscaler.autoscale() }
+            else if (manualscalerEnabled)
+                allFlows.add(manualScaler.manualFlow)
 
             allFlows.merge().collect()
         }

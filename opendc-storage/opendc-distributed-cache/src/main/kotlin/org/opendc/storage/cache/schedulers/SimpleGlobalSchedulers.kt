@@ -13,7 +13,7 @@ class GreedyObjectPlacer: ConsistentHash, DynamicObjectPlacer {
     lateinit var scheduler: TaskScheduler
     override fun getNode(key: String?): Node {
         val shortestQueue = scheduler.hostQueues.values
-            .minBy { it.size }
+            .minBy { it.q.size }
         return shortestQueue.host
     }
 

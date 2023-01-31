@@ -27,7 +27,8 @@ class CacheHost(
 
     val hostId = nextHostId
 
-    val cache = LRUMap<Long, Boolean>(numCacheSlots, numCacheSlots)
+//    val cache = LRUMap<Long, Boolean>(numCacheSlots, numCacheSlots)
+    val cache = HashMap<Long, Boolean>()
 
     val freeProcessingSlots = Semaphore(numProcessingSlots)
 
