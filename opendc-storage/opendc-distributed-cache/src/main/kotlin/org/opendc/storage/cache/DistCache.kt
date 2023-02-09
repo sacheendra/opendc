@@ -26,6 +26,7 @@ import org.apache.parquet.hadoop.metadata.CompressionCodecName
 import org.opendc.simulator.kotlin.runSimulation
 import org.opendc.storage.cache.schedulers.GreedyObjectPlacer
 import org.opendc.storage.cache.schedulers.RandomObjectPlacer
+import org.opendc.storage.cache.schedulers.SimpleReplicator
 import org.opendc.trace.util.parquet.LocalParquetReader
 import org.opendc.trace.util.parquet.LocalParquetWriter
 import java.nio.file.Paths
@@ -76,7 +77,8 @@ class DistCache : CliktCommand() {
             }
             // Setup scheduler
             val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10)
-            val scheduler = TaskScheduler(workstealEnabled, objectPlacer)
+            val replicatedPlacer = SimpleReplicator(objectPlacer, 60.seconds)
+            val scheduler = TaskScheduler(workstealEnabled, replicatedPlacer)
 
             // Setup hosts
             val addHostsFlow = flow {
@@ -144,13 +146,14 @@ class DistCache : CliktCommand() {
                     // Need to stop timed events like autoscaling before the scheduler
                     metricRecorder.complete()
                     scheduler.complete()
+                    replicatedPlacer.complete = true
                 }
 
 
             // Start execution
             // No simulation runs till we call this
             val allFlows = mutableListOf(addHostsFlow, warmupFlow, inputFlow, writeTaskFlow,
-                metricRecorder.metricsFlow)
+                metricRecorder.metricsFlow, replicatedPlacer.replicatorFlow)
             if (autoscalerEnabled)
                 metricRecorder.addCallback{ autoscaler.autoscale() }
             else if (manualscalerEnabled)

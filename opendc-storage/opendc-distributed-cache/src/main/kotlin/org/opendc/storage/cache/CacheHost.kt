@@ -16,7 +16,7 @@ class CacheHost(
     val remoteStorage: RemoteStorage,
     val scheduler: TaskScheduler,
     val metricRecorder: MetricRecorder
-) : Node {
+) {
 
     companion object {
         var nextHostId: Int = 0
@@ -64,14 +64,5 @@ class CacheHost(
         task.storageDelay = storageDelay
 
         metricRecorder.recordCompletion(task)
-    }
-
-    override fun name(): String {
-        return hostId.toString()
-    }
-
-    override fun compareTo(other: Node?): Int {
-        other as CacheHost
-        return hostId.compareTo(other.hostId)
     }
 }

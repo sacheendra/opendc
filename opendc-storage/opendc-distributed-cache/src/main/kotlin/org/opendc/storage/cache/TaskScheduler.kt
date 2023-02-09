@@ -17,6 +17,7 @@ class TaskScheduler(
     val nodeSelector: ConsistentHash
 ) {
     val hosts = ArrayList<CacheHost>()
+    val queues = ArrayList<ChannelQueue>()
     val hostQueues = HashMap<Int, ChannelQueue>()
     val newHostsChannel = Channel<CacheHost>()
 
@@ -42,10 +43,18 @@ class TaskScheduler(
 
     suspend fun addHosts(toAdd: List<CacheHost>) {
         hosts.addAll(toAdd)
-        nodeSelector.addNodes(toAdd)
-        for (host in toAdd) {
-            hostQueues[host.hostId] = ChannelQueue(host)
+        val queuesToAdd = toAdd.map {
+            val cq = ChannelQueue(it)
+            hostQueues[it.hostId] = cq
+            cq
         }
+        queues.addAll(queuesToAdd)
+        nodeSelector.addNodes(queuesToAdd)
+
+        queues.forEachIndexed { index, cq ->
+            cq.idx = index
+        }
+
         // Start listening on queue after creating all queues
         // Otherwise, items may be sent to queues which are not being read
         for (host in toAdd) {
@@ -55,18 +64,17 @@ class TaskScheduler(
 
     suspend fun removeHosts(toRemove: List<CacheHost>) {
         hosts.removeAll(toRemove)
-        nodeSelector.removeNodes(toRemove)
-        val queuesToDrain = toRemove.map { host ->
-            // DONE: NEED TO RESCHEDULE TASKS AFTER REMOVING HOSTS
-            // collect and re-offer tasks
-//            println("closed ${host.hostId}")
-            val queue = hostQueues[host.hostId]!!
-            queue.closed = true
-            hostQueues.remove(host.hostId)!!
+        val queuesToRemove = toRemove.map { hostQueues[it.hostId]!! }
+        queues.removeAll(queuesToRemove)
+        nodeSelector.removeNodes(queuesToRemove)
+
+        queuesToRemove.forEach {
+            it.closed = true
+            hostQueues.remove(it.host.hostId)
         }
 
         // Drain queues after they have been removed
-        queuesToDrain.forEach { queue ->
+        queuesToRemove.forEach { queue ->
             // Drain queue on node shut down
             for (task in queue.q) {
                 this.offerTask(task)
@@ -90,6 +98,7 @@ class TaskScheduler(
                 if (chosenQueue.q.size > 5) {
                     val task = chosenQueue.next()!!
                     task.stolen = true
+                    task.hostId = chosenQueue.host.hostId
                     return task
                 }
             }
@@ -98,31 +107,16 @@ class TaskScheduler(
             task = queue.next()
         }
 
+        task?.hostId = queue.host.hostId
         return task
     }
 
     suspend fun offerTask(task: CacheTask) {
         // Decide host
-        val host = nodeSelector.getNode(task.objectId.toString()) as CacheHost
-        val chosenHostId = host.hostId
-        val queue = hostQueues[chosenHostId]!!
-
-        val oldHostId = task.hostId
-        task.hostId = chosenHostId
+        val queue = nodeSelector.getNode(task.objectId.toString()) as ChannelQueue
 
         queue.q.add(task)
         queue.pleaseNotify()
-//        if (res.isFailure) {
-//            println(res.isClosed)
-//            println(queue.size)
-//            println(hosts.size)
-//            for (h in hosts) {
-//                println(hostQueues[h.hostId]!!.size)
-//            }
-//            println("failed send sourcehost: $oldHostId targethost: $chosenHostId")
-//            exitProcess(1)
-//        }
-
     }
 
     fun complete() {
@@ -134,9 +128,10 @@ class TaskScheduler(
     }
 }
 
-class ChannelQueue(h: CacheHost) {
+class ChannelQueue(h: CacheHost): Node {
 //    val c: Channel<CacheTask> = Channel(Channel.UNLIMITED)
     val q: PriorityQueue<CacheTask> = PriorityQueue { a, b -> (a.submitTime - b.submitTime).toInt() }
+    var idx: Int = -1
     private val notifier: Mutex = Mutex()
     var closed: Boolean = false
         set(value) {
@@ -160,5 +155,14 @@ class ChannelQueue(h: CacheHost) {
 
     fun pleaseNotify() {
         if (notifier.isLocked) notifier.unlock()
+    }
+
+    override fun name(): String {
+        return host.hostId.toString()
+    }
+
+    override fun compareTo(other: Node?): Int {
+        other as ChannelQueue
+        return host.hostId.compareTo(other.host.hostId)
     }
 }
