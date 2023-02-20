@@ -1,20 +1,15 @@
 package org.opendc.storage.cache
 
-import ch.supsi.dti.isin.cluster.Node
-import ch.supsi.dti.isin.consistenthash.ConsistentHash
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.yield
-import org.opendc.storage.cache.schedulers.DynamicObjectPlacer
+import org.opendc.storage.cache.schedulers.ObjectPlacer
 import java.util.PriorityQueue
-import kotlin.system.exitProcess
 
 class TaskScheduler(
     val stealWork: Boolean = true,
-    val nodeSelector: ConsistentHash
+    val nodeSelector: ObjectPlacer
 ) {
     val hosts = ArrayList<CacheHost>()
     val hostQueues = HashMap<Int, ChannelQueue>()
@@ -35,14 +30,12 @@ class TaskScheduler(
     }
 
     init {
-        if (nodeSelector is DynamicObjectPlacer) {
-            nodeSelector.registerScheduler(this)
-        }
+        nodeSelector.registerScheduler(this)
     }
 
     suspend fun addHosts(toAdd: List<CacheHost>) {
         hosts.addAll(toAdd)
-        nodeSelector.addNodes(toAdd)
+        nodeSelector.addHosts(toAdd)
         for (host in toAdd) {
             hostQueues[host.hostId] = ChannelQueue(host)
         }
@@ -53,9 +46,9 @@ class TaskScheduler(
         }
     }
 
-    suspend fun removeHosts(toRemove: List<CacheHost>) {
+    fun removeHosts(toRemove: List<CacheHost>) {
         hosts.removeAll(toRemove)
-        nodeSelector.removeNodes(toRemove)
+        nodeSelector.removeHosts(toRemove)
         val queuesToDrain = toRemove.map { host ->
             // DONE: NEED TO RESCHEDULE TASKS AFTER REMOVING HOSTS
             // collect and re-offer tasks
@@ -101,9 +94,9 @@ class TaskScheduler(
         return task
     }
 
-    suspend fun offerTask(task: CacheTask) {
+    fun offerTask(task: CacheTask) {
         // Decide host
-        val host = nodeSelector.getNode(task.objectId.toString()) as CacheHost
+        val host = nodeSelector.getNode(task.objectId) as CacheHost
         val chosenHostId = host.hostId
         val queue = hostQueues[chosenHostId]!!
 

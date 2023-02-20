@@ -24,7 +24,9 @@ import kotlinx.coroutines.launch
 import org.apache.parquet.hadoop.ParquetFileWriter
 import org.apache.parquet.hadoop.metadata.CompressionCodecName
 import org.opendc.simulator.kotlin.runSimulation
+import org.opendc.storage.cache.schedulers.ConsistentHashWrapper
 import org.opendc.storage.cache.schedulers.GreedyObjectPlacer
+import org.opendc.storage.cache.schedulers.ObjectPlacer
 import org.opendc.storage.cache.schedulers.RandomObjectPlacer
 import org.opendc.trace.util.parquet.LocalParquetReader
 import org.opendc.trace.util.parquet.LocalParquetWriter
@@ -129,7 +131,7 @@ class DistCache : CliktCommand() {
                     if (task != null) emit(task)
                     else break
                 }
-            }
+            }.take(10000)
                 .onEach {
                     lastTask = it
                     launch {
@@ -163,7 +165,7 @@ class DistCache : CliktCommand() {
         println("OK!")
     }
 
-    fun mapPlacementAlgoName(name: String, size: Int): ConsistentHash {
+    fun mapPlacementAlgoName(name: String, size: Int): ObjectPlacer {
         if (name == "greedy") {
             return GreedyObjectPlacer()
         } else if (name == "random") {
@@ -186,6 +188,6 @@ class DistCache : CliktCommand() {
             }
         }
 
-        return ConsistentHash.create(algo, ConsistentHash.DEFAULT_HASH_ALGOTITHM, size)
+        return ConsistentHashWrapper(ConsistentHash.create(algo, ConsistentHash.DEFAULT_HASH_ALGOTITHM, size))
     }
 }

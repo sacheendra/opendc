@@ -17,14 +17,12 @@ class MetricRecorder(
     val metricsFlow: Flow<Unit> = flow<Unit> {
         delay(period)
         while (!complete) {
+            for (cb in callbacks) cb()
+            resetMetrics()
             emit(Unit)
             delay(period)
         }
     }
-        .onEach {
-            for (cb in callbacks) cb()
-            resetMetrics()
-        }
 
     fun complete() {
         complete = true
