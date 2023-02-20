@@ -6,7 +6,6 @@ import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.TaskScheduler
 
 interface ObjectPlacer {
-    fun getNode(key: Long): CacheHost
 
     fun addHosts(hosts: List<CacheHost>)
 
@@ -19,6 +18,6 @@ interface ObjectPlacer {
     fun complete()
 
     suspend fun getNextTask(host: CacheHost): CacheTask?
-    
+
     fun offerTask(task: CacheTask)
 }

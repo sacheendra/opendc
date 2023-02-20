@@ -3,10 +3,16 @@ package org.opendc.storage.cache.schedulers
 import ch.supsi.dti.isin.consistenthash.ConsistentHash
 import kotlinx.coroutines.flow.Flow
 import org.opendc.storage.cache.CacheHost
+import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.TaskScheduler
 
-class ConsistentHashWrapper(val chash: ConsistentHash): ObjectPlacer {
-    override fun getNode(key: Long): CacheHost {
+class ConsistentHashWrapper(
+    val chash: ConsistentHash,
+    val stealWork: Boolean = false
+): ObjectPlacer {
+
+    lateinit var scheduler: TaskScheduler
+    fun getNode(key: Long): CacheHost {
         return chash.getNode(key.toString()) as CacheHost
     }
 
@@ -19,7 +25,7 @@ class ConsistentHashWrapper(val chash: ConsistentHash): ObjectPlacer {
     }
 
     override fun registerScheduler(scheduler: TaskScheduler) {
-        TODO("Not yet implemented")
+        this.scheduler = scheduler
     }
 
     override fun getPlacerFlow(): Flow<Unit>? {
@@ -27,5 +33,44 @@ class ConsistentHashWrapper(val chash: ConsistentHash): ObjectPlacer {
     }
 
     override fun complete() {}
+    override suspend fun getNextTask(host: CacheHost): CacheTask? {
+        val queue = scheduler.hostQueues[host.hostId]
+        if (queue == null) return null // This means the node has been deleted
+
+        if (queue.closed) return null
+
+        var task = queue.next()
+
+        if (task == null) {
+            if (stealWork) {
+                // Work steal
+                val chosenQueue = scheduler.hostQueues.values
+                    .maxWith{a, b -> a.q.size - b.q.size}
+                if (chosenQueue.q.size > 5) {
+                    val task = chosenQueue.next()!!
+                    task.stolen = true
+                    task.hostId = host.hostId
+                    return task
+                }
+            }
+
+            queue.wait()
+            task = queue.next()
+        }
+
+        task?.hostId = host.hostId
+
+        return task
+    }
+
+    override fun offerTask(task: CacheTask) {
+        // Decide host
+        val host = getNode(task.objectId)
+        val chosenHostId = host.hostId
+        val queue = scheduler.hostQueues[chosenHostId]!!
+
+        queue.q.add(task)
+        queue.pleaseNotify()
+    }
 
 }

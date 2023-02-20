@@ -68,54 +68,11 @@ class TaskScheduler(
     }
 
     suspend fun getNextTask(host: CacheHost): CacheTask? {
-        val queue = hostQueues[host.hostId]
-        if (queue == null) return null // This means the node has been deleted
-
-        if (queue.closed) return null
-
-        var task = queue.next()
-
-        if (task == null) {
-            if (stealWork) {
-                // Work steal
-                val chosenQueue = hostQueues.values
-                    .maxWith{a, b -> a.q.size - b.q.size}
-                if (chosenQueue.q.size > 5) {
-                    val task = chosenQueue.next()!!
-                    task.stolen = true
-                    return task
-                }
-            }
-
-            queue.wait()
-            task = queue.next()
-        }
-
-        return task
+        return nodeSelector.getNextTask(host)
     }
 
     fun offerTask(task: CacheTask) {
-        // Decide host
-        val host = nodeSelector.getNode(task.objectId) as CacheHost
-        val chosenHostId = host.hostId
-        val queue = hostQueues[chosenHostId]!!
-
-        val oldHostId = task.hostId
-        task.hostId = chosenHostId
-
-        queue.q.add(task)
-        queue.pleaseNotify()
-//        if (res.isFailure) {
-//            println(res.isClosed)
-//            println(queue.size)
-//            println(hosts.size)
-//            for (h in hosts) {
-//                println(hostQueues[h.hostId]!!.size)
-//            }
-//            println("failed send sourcehost: $oldHostId targethost: $chosenHostId")
-//            exitProcess(1)
-//        }
-
+        nodeSelector.offerTask(task)
     }
 
     fun complete() {
@@ -123,11 +80,12 @@ class TaskScheduler(
             queue.closed = true
         }
 
+        nodeSelector.complete()
         newHostsChannel.close()
     }
 }
 
-class ChannelQueue(h: CacheHost) {
+class ChannelQueue(h: CacheHost?) {
 //    val c: Channel<CacheTask> = Channel(Channel.UNLIMITED)
     val q: PriorityQueue<CacheTask> = PriorityQueue { a, b -> (a.submitTime - b.submitTime).toInt() }
     private val notifier: Mutex = Mutex()
@@ -136,7 +94,7 @@ class ChannelQueue(h: CacheHost) {
             field = value
             if (notifier.isLocked) notifier.unlock()
         }
-    val host: CacheHost = h
+    val host: CacheHost? = h
 
     fun next(): CacheTask? {
         return if (q.size > 0) {
