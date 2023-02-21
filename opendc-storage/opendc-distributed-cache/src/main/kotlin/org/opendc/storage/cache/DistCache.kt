@@ -4,7 +4,6 @@ package org.opendc.storage.cache
 import ch.supsi.dti.isin.consistenthash.ConsistentHash
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.arguments.argument
-import com.github.ajalt.clikt.parameters.arguments.default
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
@@ -24,6 +23,7 @@ import kotlinx.coroutines.launch
 import org.apache.parquet.hadoop.ParquetFileWriter
 import org.apache.parquet.hadoop.metadata.CompressionCodecName
 import org.opendc.simulator.kotlin.runSimulation
+import org.opendc.storage.cache.schedulers.CentralizedDataAwarePlacer
 import org.opendc.storage.cache.schedulers.ConsistentHashWrapper
 import org.opendc.storage.cache.schedulers.GreedyObjectPlacer
 import org.opendc.storage.cache.schedulers.ObjectPlacer
@@ -45,19 +45,23 @@ class DistCache : CliktCommand() {
     val autoscalerEnabled: Boolean by option().flag(default=false)
     val watermarks: Pair<Double, Double> by option().double().pair().default(Pair(0.6, 0.9))
     val manualscalerEnabled: Boolean by option().flag(default=false)
-    val manualOptions: Triple<Long, Long, Long> by option().long().triple().default(Triple(4000000, 5, 10))
+    val manualOptions: Triple<Long, Long, Long> by option().long().triple().default(Triple(4000000, 11, 22))
+    val builtinscalerEnabled: Boolean by option().flag(default=false)
     // Work stealing options
     val workstealEnabled: Boolean by option().flag(default=false)
+    // Minimize movement for centralized algos
+    val minMovement: Boolean by option().flag(default=false)
     // Indirection based load balancing options
     // Indirection based autoscaling options
     // Prefetching options
 
     override fun run() {
+
         val start = System.currentTimeMillis()
         runSimulation {
 
             // Setup remote storage
-            val rs = RemoteStorage()
+            val remoteStorage = RemoteStorage()
 
             // Setup metrics recorder
             val resultWritePath = Paths.get(outputFile)
@@ -65,8 +69,8 @@ class DistCache : CliktCommand() {
                 .withCompressionCodec(CompressionCodecName.SNAPPY)
                 .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
                 .build()
-//            val metricRecorder = MetricRecorder(60.seconds)
-            val scalingPeriod = 5.minutes
+
+            val scalingPeriod = 1.minutes
             val metricRecorder = MetricRecorder(scalingPeriod)
 
             val warmupDelay = 1000*100000
@@ -83,13 +87,13 @@ class DistCache : CliktCommand() {
             // Setup hosts
             val addHostsFlow = flow {
                 scheduler.addHosts((1..numHosts)
-                    .map { CacheHost(4, 100, timeSource, rs, scheduler, metricRecorder) })
+                    .map { CacheHost(4, 100, timeSource, remoteStorage, scheduler, metricRecorder) })
                 emit(Unit)
             }
 
             // Setup autoscaler
-            val autoscaler = Autoscaler(timeSource, rs, scheduler, metricRecorder, watermarks)
-            val manualScaler = ManualScaler(manualOptions.first + warmupDelay, manualOptions.third, scheduler, timeSource, rs, metricRecorder)
+            val autoscaler = Autoscaler(timeSource, remoteStorage, scheduler, metricRecorder, watermarks)
+            val manualScaler = ManualScaler(manualOptions.first + warmupDelay, manualOptions.third, scheduler, timeSource, remoteStorage, metricRecorder)
 
             // Write results for completed tasks
             val writeTaskFlow = scheduler.completedTaskFlow
@@ -131,7 +135,7 @@ class DistCache : CliktCommand() {
                     if (task != null) emit(task)
                     else break
                 }
-            }.take(10000)
+            }
                 .onEach {
                     lastTask = it
                     launch {
@@ -157,6 +161,8 @@ class DistCache : CliktCommand() {
                 metricRecorder.addCallback{ autoscaler.autoscale() }
             else if (manualscalerEnabled)
                 allFlows.add(manualScaler.manualFlow)
+            else if (builtinscalerEnabled)
+                objectPlacer.registerAutoscaler(autoscaler)
 
             allFlows.merge().collect()
         }
@@ -170,6 +176,8 @@ class DistCache : CliktCommand() {
             return GreedyObjectPlacer()
         } else if (name == "random") {
             return RandomObjectPlacer()
+        } else if (name == "centralized") {
+            return CentralizedDataAwarePlacer(1.seconds, minMovement)
         }
 
         // Beamer is missing

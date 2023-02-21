@@ -1,6 +1,7 @@
 package org.opendc.storage.cache.schedulers
 
 import kotlinx.coroutines.flow.Flow
+import org.opendc.storage.cache.Autoscaler
 import org.opendc.storage.cache.CacheHost
 import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.ChannelQueue
@@ -8,16 +9,13 @@ import org.opendc.storage.cache.TaskScheduler
 
 class GreedyObjectPlacer: ObjectPlacer {
 
-    lateinit var scheduler: TaskScheduler
+    override lateinit var scheduler: TaskScheduler
+    override var autoscaler: Autoscaler? = null
     val globalQueue = ChannelQueue(null)
 
     override fun addHosts(hosts: List<CacheHost>) {} // Not necessary
 
     override fun removeHosts(hosts: List<CacheHost>) {} // Not necessary
-
-    override fun registerScheduler(scheduler: TaskScheduler) {
-        this.scheduler = scheduler
-    }
 
     override fun getPlacerFlow(): Flow<Unit>? {
         return null
@@ -51,7 +49,8 @@ class GreedyObjectPlacer: ObjectPlacer {
 
 class RandomObjectPlacer: ObjectPlacer {
 
-    lateinit var scheduler: TaskScheduler
+    override lateinit var scheduler: TaskScheduler
+    override var autoscaler: Autoscaler? = null
     fun getNode(): CacheHost {
         return scheduler.hosts.random()
     }
@@ -59,10 +58,6 @@ class RandomObjectPlacer: ObjectPlacer {
     override fun addHosts(hosts: List<CacheHost>) {} // Not necessary
 
     override fun removeHosts(hosts: List<CacheHost>) {} // Not necessary
-
-    override fun registerScheduler(scheduler: TaskScheduler) {
-        this.scheduler = scheduler
-    }
 
     override fun getPlacerFlow(): Flow<Unit>? {
         return null

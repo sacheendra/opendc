@@ -2,6 +2,7 @@ package org.opendc.storage.cache.schedulers
 
 import ch.supsi.dti.isin.consistenthash.ConsistentHash
 import kotlinx.coroutines.flow.Flow
+import org.opendc.storage.cache.Autoscaler
 import org.opendc.storage.cache.CacheHost
 import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.TaskScheduler
@@ -11,7 +12,8 @@ class ConsistentHashWrapper(
     val stealWork: Boolean = false
 ): ObjectPlacer {
 
-    lateinit var scheduler: TaskScheduler
+    override lateinit var scheduler: TaskScheduler
+    override var autoscaler: Autoscaler? = null
     fun getNode(key: Long): CacheHost {
         return chash.getNode(key.toString()) as CacheHost
     }
@@ -22,10 +24,6 @@ class ConsistentHashWrapper(
 
     override fun removeHosts(hosts: List<CacheHost>) {
         chash.removeNodes(hosts)
-    }
-
-    override fun registerScheduler(scheduler: TaskScheduler) {
-        this.scheduler = scheduler
     }
 
     override fun getPlacerFlow(): Flow<Unit>? {
