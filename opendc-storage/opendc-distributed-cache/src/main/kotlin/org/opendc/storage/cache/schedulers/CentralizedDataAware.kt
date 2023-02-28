@@ -21,7 +21,6 @@ class CentralizedDataAwarePlacer(
     val keyToNodeMap = mutableMapOf<Long, CacheHost>()
     val nodeToKeysMap = mutableMapOf<CacheHost, MutableList<Long>>()
     val globalQueue = ChannelQueue(null)
-//    val hostQueueHeap: PriorityQueue<ChannelQueue> = PriorityQueue { a, b -> a.q.size - b.q.size }
 
     var complete = false
     val thisFlow = flow<Unit> {
@@ -125,7 +124,7 @@ class CentralizedDataAwarePlacer(
         globalQueue.q.add(task)
     }
 
-    suspend fun rebalance() {
+    fun rebalance() {
         val perKeyScore = mutableMapOf<Long, Long>()
         // Only considering not yet scheduled tasks
         globalQueue.q.filter { it.hostId == -1 }.forEach {
@@ -136,18 +135,6 @@ class CentralizedDataAwarePlacer(
             Currently moving heaviest objects first, try moving lightest objects first
          */
         val sortedKeys: List<KeyScorePair> = perKeyScore.toList().map { KeyScorePair(it.first, it.second) }.sortedByDescending { it.score }
-
-        if (autoscaler != null) {
-            TODO("Make a plausible autoscaler")
-            val totalDuration = sortedKeys.sumOf { it.score }
-            val occupancy = totalDuration / (scheduler.hosts.size * period.inWholeMilliseconds)
-
-            if (occupancy > 1 || occupancy < 0.6) {
-                val newNumHosts = (totalDuration / (0.8 * period.inWholeMilliseconds)).toInt()
-                val hostsChange = newNumHosts - scheduler.hosts.size
-                autoscaler!!.changeNumServers(hostsChange)
-            }
-        }
 
         val (keysToAllocate, perHostScores) = if (minMovement) {
             val totalScore = sortedKeys.sumOf { it.score }
