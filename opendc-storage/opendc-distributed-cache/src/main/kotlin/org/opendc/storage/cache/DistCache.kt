@@ -25,6 +25,7 @@ import org.apache.parquet.hadoop.metadata.CompressionCodecName
 import org.opendc.simulator.kotlin.runSimulation
 import org.opendc.storage.cache.schedulers.CentralizedDataAwarePlacer
 import org.opendc.storage.cache.schedulers.ConsistentHashWrapper
+import org.opendc.storage.cache.schedulers.DelegatedDataAwarePlacer
 import org.opendc.storage.cache.schedulers.GreedyObjectPlacer
 import org.opendc.storage.cache.schedulers.ObjectPlacer
 import org.opendc.storage.cache.schedulers.RandomObjectPlacer
@@ -178,6 +179,8 @@ class DistCache : CliktCommand() {
             return RandomObjectPlacer()
         } else if (name == "centralized") {
             return CentralizedDataAwarePlacer(1.seconds, minMovement)
+        } else if (name == "delegated") {
+            return DelegatedDataAwarePlacer(10.seconds, 5, minMovement)
         }
 
         // Beamer is missing

@@ -67,8 +67,7 @@ class ConsistentHashWrapper(
         val chosenHostId = host.hostId
         val queue = scheduler.hostQueues[chosenHostId]!!
 
-        queue.q.add(task)
-        queue.pleaseNotify()
+        queue.add(task)
     }
 
 }

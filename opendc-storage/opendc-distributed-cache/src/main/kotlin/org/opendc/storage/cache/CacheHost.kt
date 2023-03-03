@@ -32,6 +32,8 @@ class CacheHost(
 
     val freeProcessingSlots = Semaphore(numProcessingSlots)
 
+    var metaRoundRobinField: Int = 0
+
     suspend fun processTasks(channel: SendChannel<CacheTask>) = coroutineScope {
         while(true) {
             freeProcessingSlots.acquire()

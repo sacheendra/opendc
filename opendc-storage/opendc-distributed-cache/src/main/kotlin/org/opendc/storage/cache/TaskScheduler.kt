@@ -1,8 +1,12 @@
 package org.opendc.storage.cache
 
+import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.SelectBuilder
+import kotlinx.coroutines.selects.SelectClause1
+import kotlinx.coroutines.selects.SelectInstance
 import kotlinx.coroutines.sync.Mutex
 import org.opendc.storage.cache.schedulers.ObjectPlacer
 import java.util.PriorityQueue
@@ -88,11 +92,12 @@ class TaskScheduler(
 class ChannelQueue(h: CacheHost?) {
 //    val c: Channel<CacheTask> = Channel(Channel.UNLIMITED)
     val q: PriorityQueue<CacheTask> = PriorityQueue { a, b -> (a.submitTime - b.submitTime).toInt() }
-    private val notifier: Mutex = Mutex()
+    val notifier2: Channel<Unit> = Channel()
+    var isLocked: Boolean = false
     var closed: Boolean = false
         set(value) {
             field = value
-            if (notifier.isLocked) notifier.unlock()
+            pleaseNotify()
         }
     val host: CacheHost? = h
 
@@ -102,14 +107,23 @@ class ChannelQueue(h: CacheHost?) {
         } else null
     }
 
-    suspend fun wait() {
-        notifier.lock()
-        // After locking wait for sender to unlock it
-        notifier.lock()
-        notifier.unlock()
+    fun add(task: CacheTask) {
+        q.add(task)
+        pleaseNotify()
     }
 
+    suspend fun wait() {
+        isLocked = true
+        notifier2.receive()
+    }
+
+    val onReceive: SelectClause1<Unit>
+        get() {
+            isLocked = true
+            return notifier2.onReceive
+        }
+
     fun pleaseNotify() {
-        if (notifier.isLocked) notifier.unlock()
+        if (isLocked) notifier2.trySend(Unit)
     }
 }

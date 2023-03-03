@@ -3,16 +3,21 @@ package org.opendc.storage.cache.schedulers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.selects.select
 import org.opendc.storage.cache.Autoscaler
 import org.opendc.storage.cache.CacheHost
 import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.ChannelQueue
 import org.opendc.storage.cache.TaskScheduler
+import java.util.PriorityQueue
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.time.Duration
 
 class CentralizedDataAwarePlacer(
     val period: Duration,
-    val minMovement: Boolean = false
+    val minMovement: Boolean = false,
+    val moveSmallestFirst: Boolean = false
 ): ObjectPlacer {
 
     override lateinit var scheduler: TaskScheduler
@@ -26,10 +31,16 @@ class CentralizedDataAwarePlacer(
     val thisFlow = flow<Unit> {
         delay(period)
         while (!complete) {
-            rebalance()
+            rebalance(null)
             emit(Unit)
             delay(period)
         }
+    }
+
+    var lateBindingSizeCorrection = 0
+    fun globalQueueSize(): Int {
+        val ogSize = globalQueue.q.size
+        return ogSize - lateBindingSizeCorrection
     }
 
     fun getNode(key: Long): CacheHost? {
@@ -76,6 +87,7 @@ class CentralizedDataAwarePlacer(
         // Late binding check
         while (task != null && task.hostId > 0) {
             task = queue.next()
+            lateBindingSizeCorrection--
         }
 
         var globalTask: CacheTask? = null
@@ -86,24 +98,33 @@ class CentralizedDataAwarePlacer(
             while (globalTask != null && globalTask.hostId > 0) {
                 globalTask = globalQueue.next()
             }
+        }
 
-            if (globalTask == null) {
-                queue.wait()
-                task = queue.next()
+        if (task == null && globalTask == null) {
+            select {
+                queue.onReceive {
+                    task = queue.next()
+                    task
+                }
+                globalQueue.onReceive {
+                    globalTask = globalQueue.next()
+                    globalTask
+                }
             }
         }
 
         if (task != null) {
-            task.hostId = host.hostId
+            lateBindingSizeCorrection++
+            task!!.hostId = host.hostId
             return task
         }
 
         if (globalTask != null) {
-            globalTask.hostId = host.hostId
-            if (globalTask.objectId in keyToNodeMap) {
-                globalTask.stolen = true
+            globalTask!!.hostId = host.hostId
+            if (globalTask!!.objectId in keyToNodeMap) {
+                globalTask!!.stolen = true
             } else {
-                keyToNodeMap[globalTask.objectId] = host
+                keyToNodeMap[globalTask!!.objectId] = host
             }
             return globalTask
         }
@@ -118,59 +139,78 @@ class CentralizedDataAwarePlacer(
             val queue = scheduler.hostQueues[chosenHostId]!!
 
             task.hostId = -1
-            queue.q.add(task)
-            queue.pleaseNotify()
+            queue.add(task)
         }
-        globalQueue.q.add(task)
+        globalQueue.add(task)
     }
 
-    fun rebalance() {
+    fun rebalance(targetScorePerHostInp: Map<CacheHost, Double>?) {
         val perKeyScore = mutableMapOf<Long, Long>()
+        var totalKeyScore: Double = 0.0
         // Only considering not yet scheduled tasks
         globalQueue.q.filter { it.hostId == -1 }.forEach {
             val currentScore = perKeyScore.getOrDefault(it.objectId, 0)
             perKeyScore[it.objectId] = currentScore + it.duration
+            totalKeyScore += it.duration
+        }
+        val normalizedPerKeyScore = perKeyScore.mapValues {
+            it.value / totalKeyScore
         }
         /*
             Currently moving heaviest objects first, try moving lightest objects first
          */
-        val sortedKeys: List<KeyScorePair> = perKeyScore.toList().map { KeyScorePair(it.first, it.second) }.sortedByDescending { it.score }
+        val sortedKeys: List<KeyScorePair> = normalizedPerKeyScore.toList().map { KeyScorePair(it.first, it.second) }.sortedByDescending { it.score }
+        val targetScorePerHost = if (targetScorePerHostInp == null) {
+            val avgScorePerHost = 1.0 / scheduler.hosts.size
+            scheduler.hosts.associateWith { avgScorePerHost }
+        } else {
+            targetScorePerHostInp
+        }
 
         val (keysToAllocate, perHostScores) = if (minMovement) {
-            val totalScore = sortedKeys.sumOf { it.score }
-            val avgScorePerHost = totalScore / scheduler.hosts.size
 
             val perHostKeys: Map<CacheHost?, KeyListScorePair> = sortedKeys.groupBy { keyToNodeMap[it.objectId] }.mapValues { entry -> KeyListScorePair(entry.value, entry.value.sumOf { it.score }) }
-            val unallocatedKeys = perHostKeys.getOrDefault(null, KeyListScorePair(listOf(), 0))
+            val unallocatedKeys = perHostKeys.getOrDefault(null, KeyListScorePair(listOf(), 0.0))
             val allocatedPerHost = perHostKeys.filter { it.key != null }
-            val sortedHosts = allocatedPerHost.toList().sortedByDescending { it.second.score }
+            val sortedHosts = allocatedPerHost.toList().sortedByDescending { it.second.score - targetScorePerHost[it.first]!! }
 
             // Trim all keys over average score per host
             val removedKeys = mutableListOf<KeyScorePair>()
-            val finalHostsWithScores = sortedHosts.map { entry ->
+            val finalHostsWithScores = sortedHosts.associate { entry ->
                 var currentScore = entry.second.score
-                val ascendingKeyList = entry.second.keyList.reversed().toMutableList()
-                while (ascendingKeyList.size > 0) {
-                    val lastKey = ascendingKeyList.removeLast()
+                val keyList = if (moveSmallestFirst) {
+                    // Keys in descending score order
+                    entry.second.keyList.toMutableList()
+                } else {
+                    entry.second.keyList.reversed().toMutableList()
+                }
+
+                val targetScore = targetScorePerHost[entry.first]!!
+                while (keyList.size > 0) {
+                    val lastKey = keyList.removeLast()
                     val newScore = currentScore - lastKey.score
-                    if (newScore < avgScorePerHost) break
+                    if (newScore < targetScore) break
 
                     removedKeys.add(lastKey)
                     currentScore = newScore
                 }
                 entry.first!! to currentScore
-            }.toMap().toMutableMap()
+            }.toMutableMap()
 
             Pair(unallocatedKeys.keyList + removedKeys, finalHostsWithScores)
         } else {
-            Pair(sortedKeys, scheduler.hosts.map { it to 0L }.toMap().toMutableMap())
+            Pair(sortedKeys, scheduler.hosts.associateWith { 0.0 }.toMutableMap())
         }
 
+        val hostMinHeap: PriorityQueue<Pair<CacheHost, Double>> = PriorityQueue { a, b -> (a.second - b.second).roundToInt() }
+        hostMinHeap.addAll(perHostScores.toList())
 
-        for (e in keysToAllocate) {
-            val minHost = perHostScores.minBy { it.value }.key
-            perHostScores[minHost] = perHostScores[minHost]!! + e.score
-            keyToNodeMap[e.objectId] = minHost
+        // Assign keys with the highest score first
+        for (e in keysToAllocate.sortedByDescending { it.score }) {
+            val minHostPair = hostMinHeap.poll()
+            val newPair = minHostPair.copy(second = minHostPair.second+e.score)
+            hostMinHeap.add(newPair)
+            keyToNodeMap[e.objectId] = minHostPair.first
         }
     }
 
@@ -178,10 +218,10 @@ class CentralizedDataAwarePlacer(
 
 data class KeyScorePair(
     val objectId: Long,
-    val score: Long
+    val score: Double
 )
 typealias KeyList = List<KeyScorePair>
 data class KeyListScorePair(
     val keyList: KeyList,
-    val score: Long
+    val score: Double
 )

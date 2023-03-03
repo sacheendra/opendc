@@ -41,8 +41,7 @@ class GreedyObjectPlacer: ObjectPlacer {
     }
 
     override fun offerTask(task: CacheTask) {
-        globalQueue.q.add(task)
-        globalQueue.pleaseNotify()
+        globalQueue.add(task)
     }
 
 }
@@ -89,8 +88,7 @@ class RandomObjectPlacer: ObjectPlacer {
         val chosenHostId = host.hostId
         val queue = scheduler.hostQueues[chosenHostId]!!
 
-        queue.q.add(task)
-        queue.pleaseNotify()
+        queue.add(task)
     }
 
 }
