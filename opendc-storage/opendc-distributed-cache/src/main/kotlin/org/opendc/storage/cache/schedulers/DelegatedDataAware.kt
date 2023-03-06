@@ -15,14 +15,18 @@ class DelegatedDataAwarePlacer(
     val period: Duration,
     val numSchedulers: Int,
     val minMovement: Boolean = false,
-    val lookBackward: Boolean = false,
-    val minimizeSpread: Boolean = false,
+    val moveSmallestFirstUnderlying: Boolean = false,
+    val moveOnSteal: Boolean = false,
+    val lookBackwardUnderlying: Boolean = false,
+    val moveSmallestFirst: Boolean = true,
+    val lookBackward: Boolean = false, // to implement
+    val minimizeSpread: Boolean = false, // to implement
 ): ObjectPlacer {
 
     override lateinit var scheduler: TaskScheduler
     override var autoscaler: Autoscaler? = null
 
-    val subPlacers: List<CentralizedDataAwarePlacer> = List(numSchedulers) { _ -> CentralizedDataAwarePlacer(period, minMovement) }
+    val subPlacers: List<CentralizedDataAwarePlacer> = List(numSchedulers) { _ -> CentralizedDataAwarePlacer(period, minMovement, moveSmallestFirstUnderlying, moveOnSteal, lookBackwardUnderlying) }
     val hostList: MutableList<CacheHost> = mutableListOf()
 
     var complete = false
@@ -117,7 +121,30 @@ class DelegatedDataAwarePlacer(
     }
 
     fun rebalance() {
-//        subPlacers.map { it. }
+        val totalScore = subPlacers.sumOf { it.perNodeScore.values.sum() }.toDouble()
+        val scorePerNode = totalScore / scheduler.hosts.size
+
+        val nodeToScore: MutableMap<Int?, List<PlacerScorePair>> = mutableMapOf()
+        subPlacers.withIndex().forEach { placer ->
+            placer.value.perNodeScore.forEach { entry ->
+                nodeToScore.merge(entry.key, listOf(PlacerScorePair(
+                    placer.index, entry.value
+                ))) {x, y -> x+y}
+            }
+        }
+        val withSortedPlacers = nodeToScore.map { entry ->
+            entry.key to entry.value.sortedByDescending { it.score }
+        }.toMap()
+        val newAllocs = withSortedPlacers[null]
+        val requestedAllocs: Map<Int, List<PlacerScorePair>> = withSortedPlacers.filter { it.key != null } as Map<Int, List<PlacerScorePair>>
+
+        requestedAllocs.forEach()
+
     }
 
 }
+
+data class PlacerScorePair(
+    val placer: Int,
+    val score: Int
+)

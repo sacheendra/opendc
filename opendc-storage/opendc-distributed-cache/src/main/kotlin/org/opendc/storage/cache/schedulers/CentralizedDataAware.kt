@@ -10,6 +10,7 @@ import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.ChannelQueue
 import org.opendc.storage.cache.TaskScheduler
 import java.util.PriorityQueue
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.time.Duration
@@ -17,7 +18,9 @@ import kotlin.time.Duration
 class CentralizedDataAwarePlacer(
     val period: Duration,
     val minMovement: Boolean = false,
-    val moveSmallestFirst: Boolean = false
+    val moveSmallestFirst: Boolean = false,
+    val moveOnSteal: Boolean = false,
+    val lookBackward: Boolean = false // to implement
 ): ObjectPlacer {
 
     override lateinit var scheduler: TaskScheduler
@@ -27,11 +30,15 @@ class CentralizedDataAwarePlacer(
     val nodeToKeysMap = mutableMapOf<CacheHost, MutableList<Long>>()
     val globalQueue = ChannelQueue(null)
 
+    val perNodeScore = mutableMapOf<Int?, Int>()
+    val perKeyScore = mutableMapOf<Long, Int>()
+
     var complete = false
     val thisFlow = flow<Unit> {
         delay(period)
         while (!complete) {
             rebalance(null)
+            getPerNodeScores()
             emit(Unit)
             delay(period)
         }
@@ -123,6 +130,9 @@ class CentralizedDataAwarePlacer(
             globalTask!!.hostId = host.hostId
             if (globalTask!!.objectId in keyToNodeMap) {
                 globalTask!!.stolen = true
+                if (moveOnSteal) {
+                    keyToNodeMap[globalTask!!.objectId] = host
+                }
             } else {
                 keyToNodeMap[globalTask!!.objectId] = host
             }
@@ -133,29 +143,33 @@ class CentralizedDataAwarePlacer(
     }
 
     override fun offerTask(task: CacheTask) {
+        perKeyScore.merge(task.objectId, 1, Int::plus)
         val host = getNode(task.objectId)
         if (host != null) {
             val chosenHostId = host.hostId
             val queue = scheduler.hostQueues[chosenHostId]!!
 
-            task.hostId = -1
+            task.hostId = -1 // Need to do this as this might be relocated task
             queue.add(task)
+            perNodeScore.merge(chosenHostId, 1, Int::plus)
+        } else {
+            perNodeScore.merge(null, 1, Int::plus)
         }
         globalQueue.add(task)
     }
 
+    fun getPerNodeScores(): Map<Int?, Int> {
+        val frozen = perNodeScore.toMap()
+        perNodeScore.clear()
+        return frozen
+    }
+
     fun rebalance(targetScorePerHostInp: Map<CacheHost, Double>?) {
-        val perKeyScore = mutableMapOf<Long, Long>()
-        var totalKeyScore: Double = 0.0
-        // Only considering not yet scheduled tasks
-        globalQueue.q.filter { it.hostId == -1 }.forEach {
-            val currentScore = perKeyScore.getOrDefault(it.objectId, 0)
-            perKeyScore[it.objectId] = currentScore + it.duration
-            totalKeyScore += it.duration
-        }
+        val totalKeyScore = perKeyScore.values.sum().toDouble()
         val normalizedPerKeyScore = perKeyScore.mapValues {
             it.value / totalKeyScore
         }
+        perKeyScore.clear()
         /*
             Currently moving heaviest objects first, try moving lightest objects first
          */
