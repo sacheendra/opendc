@@ -7,8 +7,9 @@ import kotlinx.coroutines.selects.select
 import org.opendc.storage.cache.Autoscaler
 import org.opendc.storage.cache.CacheHost
 import org.opendc.storage.cache.CacheTask
-import org.opendc.storage.cache.ChannelQueue
 import org.opendc.storage.cache.TaskScheduler
+import java.util.PriorityQueue
+import kotlin.math.roundToInt
 import kotlin.time.Duration
 
 class DelegatedDataAwarePlacer(
@@ -121,30 +122,86 @@ class DelegatedDataAwarePlacer(
     }
 
     fun rebalance() {
-        val totalScore = subPlacers.sumOf { it.perNodeScore.values.sum() }.toDouble()
+        val choppedParts = 100
+        // Calling getPerNodeScores is important to reset counters
+        val perPlacerNodeScores = subPlacers.mapIndexed { idx, scores -> IndexedValue(idx, scores.getPerNodeScores()) }
+
+        val totalScore = perPlacerNodeScores.sumOf { it.value.values.sum() }.toDouble()
         val scorePerNode = totalScore / scheduler.hosts.size
 
-        val nodeToScore: MutableMap<Int?, List<PlacerScorePair>> = mutableMapOf()
-        subPlacers.withIndex().forEach { placer ->
-            placer.value.perNodeScore.forEach { entry ->
-                nodeToScore.merge(entry.key, listOf(PlacerScorePair(
-                    placer.index, entry.value
-                ))) {x, y -> x+y}
+        val nodeToPlacer: MutableMap<Int?, MutableList<PlacerScorePair>> = mutableMapOf()
+        perPlacerNodeScores.forEach { placer ->
+            placer.value.forEach { entry ->
+                val placerList = nodeToPlacer.getOrDefault(entry.key, mutableListOf())
+                (0 until choppedParts).forEach { _ ->
+                    placerList.add(PlacerScorePair(placer.index, entry.value.toDouble() / choppedParts))
+                }
             }
         }
-        val withSortedPlacers = nodeToScore.map { entry ->
-            entry.key to entry.value.sortedByDescending { it.score }
-        }.toMap()
-        val newAllocs = withSortedPlacers[null]
-        val requestedAllocs: Map<Int, List<PlacerScorePair>> = withSortedPlacers.filter { it.key != null } as Map<Int, List<PlacerScorePair>>
 
-        requestedAllocs.forEach()
+        val unallocatedClaims = nodeToPlacer.getOrDefault(null, listOf()).toMutableList()
+        val requestedClaims: Map<Int, List<PlacerScorePair>> = nodeToPlacer.filter { it.key != null } as Map<Int, List<PlacerScorePair>>
 
+        // Trim allocations to average score per node
+        val allocatedClaims = requestedClaims.mapValues { entry ->
+            // First values are retained, later values moves
+            // Hence, largest value first to move small values
+            val placerList = if (moveSmallestFirst) {
+                entry.value.sortedByDescending { it.score }
+            } else {
+                entry.value.sortedBy { it.score }
+            }
+
+            var currentScore = 0.0
+            var cutOffIndex = 0
+            for (it in placerList.withIndex()) {
+                val newScore = currentScore + it.value.score
+                if (newScore > scorePerNode) break
+
+                currentScore = newScore
+                cutOffIndex = it.index
+            }
+
+            val toReturn = placerList.subList(0, cutOffIndex+1)
+            unallocatedClaims.addAll(placerList.subList(cutOffIndex+1, placerList.size))
+
+            PlacerListScorePair(toReturn.toMutableList(), currentScore)
+        }
+
+        val hostMinHeap: PriorityQueue<Pair<Int, PlacerListScorePair>> = PriorityQueue { a, b -> (a.second.score - b.second.score).roundToInt() }
+        hostMinHeap.addAll(allocatedClaims.toList())
+
+        for (e in unallocatedClaims.sortedByDescending { it.score }) {
+            val minHostPair = hostMinHeap.poll()
+            minHostPair.second.score += e.score
+            hostMinHeap.add(minHostPair)
+        }
+
+        // Need to normalize before returning to hosts
+        val placerToNodeAllocs: MutableMap<Int, MutableMap<Int, Double>> = mutableMapOf()
+        hostMinHeap.forEach {
+            val hostIdx = it.first
+            val placerList = it.second.placerList
+            placerList.forEach { pspair ->
+                val hostMap = placerToNodeAllocs.getOrDefault(pspair.placer, mutableMapOf())
+                val hostScore = hostMap.getOrDefault(hostIdx, 0.0)
+                hostMap[hostIdx] = hostScore + pspair.score
+            }
+        }
+
+        for (placer in subPlacers.withIndex()) {
+            placer.value.rebalance(placerToNodeAllocs[placer.index])
+        }
     }
 
 }
 
 data class PlacerScorePair(
     val placer: Int,
-    val score: Int
+    val score: Double
+)
+
+data class PlacerListScorePair(
+    val placerList: MutableList<PlacerScorePair>,
+    var score: Double
 )

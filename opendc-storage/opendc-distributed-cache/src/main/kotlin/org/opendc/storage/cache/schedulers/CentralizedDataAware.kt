@@ -164,56 +164,62 @@ class CentralizedDataAwarePlacer(
         return frozen
     }
 
-    fun rebalance(targetScorePerHostInp: Map<CacheHost, Double>?) {
-        val totalKeyScore = perKeyScore.values.sum().toDouble()
-        val normalizedPerKeyScore = perKeyScore.mapValues {
-            it.value / totalKeyScore
-        }
+    fun rebalance(targetScorePerHostInp: Map<Int, Double>?) {
+        // Maybe there is no need to normalize
+//        val totalKeyScore = perKeyScore.values.sum().toDouble()
+//        val normalizedPerKeyScore = perKeyScore.mapValues {
+//            it.value / totalKeyScore
+//        }.toList().map { KeyScorePair(it.first, it.second) }.sortedBy { it.score }
+        val normalizedPerKeyScore = perKeyScore.toList().map { KeyScorePair(it.first, it.second) }.sortedBy { it.score }
         perKeyScore.clear()
         /*
             Currently moving heaviest objects first, try moving lightest objects first
          */
-        val sortedKeys: List<KeyScorePair> = normalizedPerKeyScore.toList().map { KeyScorePair(it.first, it.second) }.sortedByDescending { it.score }
         val targetScorePerHost = if (targetScorePerHostInp == null) {
             val avgScorePerHost = 1.0 / scheduler.hosts.size
-            scheduler.hosts.associateWith { avgScorePerHost }
+            scheduler.hosts.map { it.hostId }.associateWith { avgScorePerHost }
         } else {
             targetScorePerHostInp
         }
 
         val (keysToAllocate, perHostScores) = if (minMovement) {
 
-            val perHostKeys: Map<CacheHost?, KeyListScorePair> = sortedKeys.groupBy { keyToNodeMap[it.objectId] }.mapValues { entry -> KeyListScorePair(entry.value, entry.value.sumOf { it.score }) }
-            val unallocatedKeys = perHostKeys.getOrDefault(null, KeyListScorePair(listOf(), 0.0))
-            val allocatedPerHost = perHostKeys.filter { it.key != null }
-            val sortedHosts = allocatedPerHost.toList().sortedByDescending { it.second.score - targetScorePerHost[it.first]!! }
+            // Groupby preserves order according to the docs
+            val perHostKeys: Map<CacheHost?, KeyList> = normalizedPerKeyScore.groupBy { keyToNodeMap[it.objectId] }
+            val unallocatedKeys = perHostKeys.getOrDefault(null, listOf())
+            val allocatedPerHost = perHostKeys.filter { it.key != null } as Map<CacheHost, KeyList>
+//            val sortedHosts = allocatedPerHost.toList().sortedByDescending { it.second.score - targetScorePerHost[it.first]!! } // Sorting hosts here. Not the keys in hosts
 
             // Trim all keys over average score per host
             val removedKeys = mutableListOf<KeyScorePair>()
-            val finalHostsWithScores = sortedHosts.associate { entry ->
-                var currentScore = entry.second.score
+            val finalHostsWithScores = allocatedPerHost.map { entry ->
+
+                // First values are retained, later values moves
+                // Hence, largest value first to move small values
                 val keyList = if (moveSmallestFirst) {
-                    // Keys in descending score order
-                    entry.second.keyList.toMutableList()
+                    entry.value.reversed()
                 } else {
-                    entry.second.keyList.reversed().toMutableList()
+                    entry.value
                 }
 
-                val targetScore = targetScorePerHost[entry.first]!!
-                while (keyList.size > 0) {
-                    val lastKey = keyList.removeLast()
-                    val newScore = currentScore - lastKey.score
-                    if (newScore < targetScore) break
+                val targetScore = targetScorePerHost[entry.key.hostId]!!
+                var currentScore = 0.0
+                var cutOffIndex = 0
+                for (it in keyList.withIndex()) {
+                    val newScore = currentScore + it.value.score
+                    if (newScore > targetScore) break
 
-                    removedKeys.add(lastKey)
                     currentScore = newScore
+                    cutOffIndex = it.index
                 }
-                entry.first!! to currentScore
-            }.toMutableMap()
+                removedKeys.addAll(keyList.subList(cutOffIndex+1, keyList.size))
 
-            Pair(unallocatedKeys.keyList + removedKeys, finalHostsWithScores)
+                entry.key!! to currentScore
+            }.toMap()
+
+            Pair(unallocatedKeys + removedKeys, finalHostsWithScores)
         } else {
-            Pair(sortedKeys, scheduler.hosts.associateWith { 0.0 }.toMutableMap())
+            Pair(normalizedPerKeyScore, scheduler.hosts.associateWith { 0.0 })
         }
 
         val hostMinHeap: PriorityQueue<Pair<CacheHost, Double>> = PriorityQueue { a, b -> (a.second - b.second).roundToInt() }
@@ -232,10 +238,6 @@ class CentralizedDataAwarePlacer(
 
 data class KeyScorePair(
     val objectId: Long,
-    val score: Double
+    val score: Int
 )
 typealias KeyList = List<KeyScorePair>
-data class KeyListScorePair(
-    val keyList: KeyList,
-    val score: Double
-)
