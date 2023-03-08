@@ -10,14 +10,13 @@ import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.ChannelQueue
 import org.opendc.storage.cache.TaskScheduler
 import java.util.PriorityQueue
-import java.util.concurrent.atomic.AtomicInteger
-import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.time.Duration
 
 class CentralizedDataAwarePlacer(
     val period: Duration,
-    val minMovement: Boolean = false,
+    val minMovement: Boolean = true,
+    val stealWork: Boolean = false,
     val moveSmallestFirst: Boolean = false,
     val moveOnSteal: Boolean = false,
     val lookBackward: Boolean = false // to implement
@@ -152,10 +151,13 @@ class CentralizedDataAwarePlacer(
             task.hostId = -1 // Need to do this as this might be relocated task
             queue.add(task)
             perNodeScore.merge(chosenHostId, 1, Int::plus)
+            if (stealWork) {
+                globalQueue.add(task)
+            }
         } else {
             perNodeScore.merge(null, 1, Int::plus)
+            globalQueue.add(task)
         }
-        globalQueue.add(task)
     }
 
     fun getPerNodeScores(): Map<Int?, Int> {

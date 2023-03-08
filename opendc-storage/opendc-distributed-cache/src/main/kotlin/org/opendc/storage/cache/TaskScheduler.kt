@@ -12,7 +12,6 @@ import org.opendc.storage.cache.schedulers.ObjectPlacer
 import java.util.PriorityQueue
 
 class TaskScheduler(
-    val stealWork: Boolean = true,
     val nodeSelector: ObjectPlacer
 ) {
     val hosts = ArrayList<CacheHost>()

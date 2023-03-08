@@ -51,7 +51,7 @@ class DistCache : CliktCommand() {
     // Work stealing options
     val workstealEnabled: Boolean by option().flag(default=false)
     // Minimize movement for centralized algos
-    val minMovement: Boolean by option().flag(default=false)
+    val minMovement: Boolean by option().flag(default=true)
     // Indirection based load balancing options
     // Indirection based autoscaling options
     // Prefetching options
@@ -83,7 +83,7 @@ class DistCache : CliktCommand() {
             }
             // Setup scheduler
             val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10)
-            val scheduler = TaskScheduler(workstealEnabled, objectPlacer)
+            val scheduler = TaskScheduler(objectPlacer)
 
             // Setup hosts
             val addHostsFlow = flow {
@@ -199,6 +199,6 @@ class DistCache : CliktCommand() {
             }
         }
 
-        return ConsistentHashWrapper(ConsistentHash.create(algo, ConsistentHash.DEFAULT_HASH_ALGOTITHM, size))
+        return ConsistentHashWrapper(ConsistentHash.create(algo, ConsistentHash.DEFAULT_HASH_ALGOTITHM, size), workstealEnabled)
     }
 }

@@ -16,6 +16,7 @@ class DelegatedDataAwarePlacer(
     val period: Duration,
     val numSchedulers: Int,
     val minMovement: Boolean = false,
+    val stealWork: Boolean = false,
     val moveSmallestFirstUnderlying: Boolean = false,
     val moveOnSteal: Boolean = false,
     val lookBackwardUnderlying: Boolean = false,
@@ -27,7 +28,7 @@ class DelegatedDataAwarePlacer(
     override lateinit var scheduler: TaskScheduler
     override var autoscaler: Autoscaler? = null
 
-    val subPlacers: List<CentralizedDataAwarePlacer> = List(numSchedulers) { _ -> CentralizedDataAwarePlacer(period, minMovement, moveSmallestFirstUnderlying, moveOnSteal, lookBackwardUnderlying) }
+    val subPlacers: List<CentralizedDataAwarePlacer> = List(numSchedulers) { _ -> CentralizedDataAwarePlacer(period, minMovement, stealWork, moveSmallestFirstUnderlying, moveOnSteal, lookBackwardUnderlying) }
     val hostList: MutableList<CacheHost> = mutableListOf()
 
     var complete = false
@@ -57,7 +58,14 @@ class DelegatedDataAwarePlacer(
         rebalance()
     }
 
-    override fun getPlacerFlow(): Flow<Unit>? {
+    override fun registerScheduler(scheduler: TaskScheduler) {
+        this.scheduler = scheduler
+        subPlacers.forEach {
+            it.registerScheduler(scheduler)
+        }
+    }
+
+    override fun getPlacerFlow(): Flow<Unit> {
         return thisFlow
     }
 
