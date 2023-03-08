@@ -8,6 +8,7 @@ import org.opendc.storage.cache.Autoscaler
 import org.opendc.storage.cache.CacheHost
 import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.TaskScheduler
+import org.opendc.storage.cache.multiQueueWait
 import java.util.PriorityQueue
 import kotlin.math.roundToInt
 import kotlin.time.Duration
@@ -69,15 +70,16 @@ class DelegatedDataAwarePlacer(
         return thisFlow
     }
 
-    override fun complete() {
+    override suspend fun complete() {
         complete = true
+        subPlacers.forEach {
+            it.complete()
+        }
     }
 
     override suspend fun getNextTask(host: CacheHost): CacheTask? {
         val queue = scheduler.hostQueues[host.hostId]
         if (queue == null) return null // This means the node has been deleted
-
-        if (queue.closed) return null
 
         var task = queue.next()
         // Late binding check
@@ -93,16 +95,22 @@ class DelegatedDataAwarePlacer(
         }
 
         if (task == null && globalTask == null) {
-            select {
-                queue.onReceive {
-                    task = queue.next()
-                    task
-                }
-                busiestPlacer!!.globalQueue.onReceive {
-                    globalTask = busiestPlacer.globalQueue.next()
-                    globalTask
-                }
+            val chosenQueue = multiQueueWait(queue, busiestPlacer!!.globalQueue)
+            if (chosenQueue == queue) {
+                task = queue.next()
+            } else {
+                globalTask = busiestPlacer!!.globalQueue.next()
             }
+//            select {
+//                queue.onReceive {
+//                    task = queue.next()
+//                    task
+//                }
+//                busiestPlacer!!.globalQueue.onReceive {
+//                    globalTask = busiestPlacer.globalQueue.next()
+//                    globalTask
+//                }
+//            }
         }
 
         if (task != null) {
@@ -123,7 +131,7 @@ class DelegatedDataAwarePlacer(
         return null
     }
 
-    override fun offerTask(task: CacheTask) {
+    override suspend fun offerTask(task: CacheTask) {
         val placerIdx = (task.objectId % numSchedulers).toInt()
         val placer = subPlacers[placerIdx]
         placer.offerTask(task)

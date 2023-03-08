@@ -21,13 +21,11 @@ class GreedyObjectPlacer: ObjectPlacer {
         return null
     }
 
-    override fun complete() {
-        globalQueue.closed = true
+    override suspend fun complete() {
+        globalQueue.close()
     }
 
     override suspend fun getNextTask(host: CacheHost): CacheTask? {
-        if (globalQueue.closed) return null
-
         var task = globalQueue.next()
 
         if (task == null) {
@@ -36,11 +34,12 @@ class GreedyObjectPlacer: ObjectPlacer {
         }
 
         task?.hostId = host.hostId
+//        println(task?.taskId)
 
         return task
     }
 
-    override fun offerTask(task: CacheTask) {
+    override suspend fun offerTask(task: CacheTask) {
         globalQueue.add(task)
     }
 
@@ -62,13 +61,11 @@ class RandomObjectPlacer: ObjectPlacer {
         return null
     }
 
-    override fun complete() {}
+    override suspend fun complete() {}
 
     override suspend fun getNextTask(host: CacheHost): CacheTask? {
         val queue = scheduler.hostQueues[host.hostId]
         if (queue == null) return null // This means the node has been deleted
-
-        if (queue.closed) return null
 
         var task = queue.next()
 
@@ -82,7 +79,7 @@ class RandomObjectPlacer: ObjectPlacer {
         return task
     }
 
-    override fun offerTask(task: CacheTask) {
+    override suspend fun offerTask(task: CacheTask) {
         // Decide host
         val host = getNode()
         val chosenHostId = host.hostId

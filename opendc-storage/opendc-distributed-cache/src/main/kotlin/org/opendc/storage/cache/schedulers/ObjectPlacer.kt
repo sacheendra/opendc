@@ -24,9 +24,9 @@ interface ObjectPlacer {
 
     fun getPlacerFlow(): Flow<Unit>?
 
-    fun complete()
+    suspend fun complete()
 
     suspend fun getNextTask(host: CacheHost): CacheTask?
 
-    fun offerTask(task: CacheTask)
+    suspend fun offerTask(task: CacheTask)
 }

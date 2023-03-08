@@ -30,12 +30,10 @@ class ConsistentHashWrapper(
         return null
     }
 
-    override fun complete() {}
+    override suspend fun complete() {}
     override suspend fun getNextTask(host: CacheHost): CacheTask? {
         val queue = scheduler.hostQueues[host.hostId]
         if (queue == null) return null // This means the node has been deleted
-
-        if (queue.closed) return null
 
         var task = queue.next()
 
@@ -61,7 +59,7 @@ class ConsistentHashWrapper(
         return task
     }
 
-    override fun offerTask(task: CacheTask) {
+    override suspend fun offerTask(task: CacheTask) {
         // Decide host
         val host = getNode(task.objectId)
         val chosenHostId = host.hostId

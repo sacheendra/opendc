@@ -11,7 +11,7 @@ import java.time.InstantSource
 
 class CacheHost(
     val numProcessingSlots: Int = 4,
-    val numCacheSlots: Int = 100,
+    val numCacheSlots: Int = 1000,
     val clock: InstantSource,
     val remoteStorage: RemoteStorage,
     val scheduler: TaskScheduler,
@@ -27,12 +27,13 @@ class CacheHost(
 
     val hostId = nextHostId
 
-//    val cache = LRUMap<Long, Boolean>(numCacheSlots, numCacheSlots)
-    val cache = HashMap<Long, Boolean>()
+    val cache: MutableMap<Long, Boolean> = if (numCacheSlots > 0) {
+        LRUMap<Long, Boolean>(numCacheSlots, numCacheSlots)
+    } else {
+        HashMap<Long, Boolean>()
+    }
 
     val freeProcessingSlots = Semaphore(numProcessingSlots)
-
-    var metaRoundRobinField: Int = 0
 
     suspend fun processTasks(channel: SendChannel<CacheTask>) = coroutineScope {
         while(true) {

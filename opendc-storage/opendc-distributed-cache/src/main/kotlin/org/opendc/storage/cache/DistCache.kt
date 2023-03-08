@@ -83,6 +83,7 @@ class DistCache : CliktCommand() {
             }
             // Setup scheduler
             val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10)
+            val placerFlow = objectPlacer.getPlacerFlow()
             val scheduler = TaskScheduler(objectPlacer)
 
             // Setup hosts
@@ -158,6 +159,11 @@ class DistCache : CliktCommand() {
             // No simulation runs till we call this
             val allFlows = mutableListOf(addHostsFlow, warmupFlow, inputFlow, writeTaskFlow,
                 metricRecorder.metricsFlow)
+
+            if (placerFlow != null) {
+                allFlows.add(placerFlow)
+            }
+
             if (autoscalerEnabled)
                 metricRecorder.addCallback{ autoscaler.autoscale() }
             else if (manualscalerEnabled)

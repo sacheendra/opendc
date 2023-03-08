@@ -9,8 +9,10 @@ import org.opendc.storage.cache.CacheHost
 import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.ChannelQueue
 import org.opendc.storage.cache.TaskScheduler
+import org.opendc.storage.cache.multiQueueWait
 import java.util.PriorityQueue
 import kotlin.math.roundToInt
+import kotlin.system.exitProcess
 import kotlin.time.Duration
 
 class CentralizedDataAwarePlacer(
@@ -79,15 +81,14 @@ class CentralizedDataAwarePlacer(
         return thisFlow
     }
 
-    override fun complete() {
+    override suspend fun complete() {
         complete = true
+        globalQueue.close()
     }
 
     override suspend fun getNextTask(host: CacheHost): CacheTask? {
         val queue = scheduler.hostQueues[host.hostId]
         if (queue == null) return null // This means the node has been deleted
-
-        if (queue.closed) return null
 
         var task = queue.next()
         // Late binding check
@@ -107,16 +108,23 @@ class CentralizedDataAwarePlacer(
         }
 
         if (task == null && globalTask == null) {
-            select {
-                queue.onReceive {
-                    task = queue.next()
-                    task
-                }
-                globalQueue.onReceive {
-                    globalTask = globalQueue.next()
-                    globalTask
-                }
+            val chosenQueue = multiQueueWait(queue, globalQueue)
+//            exitProcess(1)
+            if (chosenQueue == queue) {
+                task = queue.next()
+            } else {
+                globalTask = globalQueue.next()
             }
+//            select {
+//                queue.onReceive {
+//                    task = queue.next()
+//                    task
+//                }
+//                globalQueue.onReceive {
+//                    globalTask = globalQueue.next()
+//                    globalTask
+//                }
+//            }
         }
 
         if (task != null) {
@@ -141,7 +149,7 @@ class CentralizedDataAwarePlacer(
         return null
     }
 
-    override fun offerTask(task: CacheTask) {
+    override suspend fun offerTask(task: CacheTask) {
         perKeyScore.merge(task.objectId, 1, Int::plus)
         val host = getNode(task.objectId)
         if (host != null) {
@@ -184,14 +192,14 @@ class CentralizedDataAwarePlacer(
             targetScorePerHostInp
         }
 
-        val (keysToAllocate, perHostScores) = if (minMovement) {
+        // Groupby preserves order according to the docs
+        val perHostKeys: Map<CacheHost?, KeyList> = normalizedPerKeyScore.groupBy { keyToNodeMap[it.objectId] }
+        val unallocatedKeys = perHostKeys.getOrDefault(null, listOf())
+        val allocatedPerHost = perHostKeys.filter { it.key != null } as Map<CacheHost, KeyList>
 
-            // Groupby preserves order according to the docs
-            val perHostKeys: Map<CacheHost?, KeyList> = normalizedPerKeyScore.groupBy { keyToNodeMap[it.objectId] }
-            val unallocatedKeys = perHostKeys.getOrDefault(null, listOf())
-            val allocatedPerHost = perHostKeys.filter { it.key != null } as Map<CacheHost, KeyList>
+        val (keysToAllocate, perHostScores) = if (minMovement && allocatedPerHost.isNotEmpty()) {
 //            val sortedHosts = allocatedPerHost.toList().sortedByDescending { it.second.score - targetScorePerHost[it.first]!! } // Sorting hosts here. Not the keys in hosts
-
+//println(perHostKeys.keys)
             // Trim all keys over average score per host
             val removedKeys = mutableListOf<KeyScorePair>()
             val finalHostsWithScores = allocatedPerHost.map { entry ->
@@ -216,7 +224,7 @@ class CentralizedDataAwarePlacer(
                 }
                 removedKeys.addAll(keyList.subList(cutOffIndex+1, keyList.size))
 
-                entry.key!! to currentScore
+                entry.key to currentScore
             }.toMap()
 
             Pair(unallocatedKeys + removedKeys, finalHostsWithScores)
@@ -225,6 +233,7 @@ class CentralizedDataAwarePlacer(
         }
 
         val hostMinHeap: PriorityQueue<Pair<CacheHost, Double>> = PriorityQueue { a, b -> (a.second - b.second).roundToInt() }
+//        println(perHostScores.toList())
         hostMinHeap.addAll(perHostScores.toList())
 
         // Assign keys with the highest score first
