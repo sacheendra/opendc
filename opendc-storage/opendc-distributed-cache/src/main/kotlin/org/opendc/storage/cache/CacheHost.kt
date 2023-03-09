@@ -7,6 +7,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import org.apache.commons.collections4.map.LRUMap
+import org.opendc.storage.cache.schedulers.GreedyObjectPlacer
 import java.time.InstantSource
 
 class CacheHost(

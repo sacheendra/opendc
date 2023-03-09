@@ -3,33 +3,27 @@ package org.opendc.storage.cache.schedulers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.selects.select
-import org.opendc.storage.cache.Autoscaler
 import org.opendc.storage.cache.CacheHost
 import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.TaskScheduler
-import org.opendc.storage.cache.multiQueueWait
 import java.util.PriorityQueue
 import kotlin.math.roundToInt
 import kotlin.time.Duration
 
 class DelegatedDataAwarePlacer(
     val period: Duration,
-    val numSchedulers: Int,
-    val minMovement: Boolean = false,
+    val subPlacers: List<CentralizedDataAwarePlacer>,
     val stealWork: Boolean = false,
-    val moveSmallestFirstUnderlying: Boolean = false,
-    val moveOnSteal: Boolean = false,
-    val lookBackwardUnderlying: Boolean = false,
-    val moveSmallestFirst: Boolean = true,
+    val moveSmallestFirst: Boolean = false,
     val lookBackward: Boolean = false, // to implement
     val minimizeSpread: Boolean = false, // to implement
 ): ObjectPlacer {
 
     override lateinit var scheduler: TaskScheduler
-    override var autoscaler: Autoscaler? = null
 
-    val subPlacers: List<CentralizedDataAwarePlacer> = List(numSchedulers) { _ -> CentralizedDataAwarePlacer(period, minMovement, stealWork, moveSmallestFirstUnderlying, moveOnSteal, lookBackwardUnderlying) }
+    val numSchedulers = subPlacers.size
     val hostList: MutableList<CacheHost> = mutableListOf()
 
     var complete = false
@@ -67,7 +61,8 @@ class DelegatedDataAwarePlacer(
     }
 
     override fun getPlacerFlow(): Flow<Unit> {
-        return thisFlow
+        val subPlacerFlows = subPlacers.mapNotNull { it.getPlacerFlow() }
+        return subPlacerFlows.plus(thisFlow).merge()
     }
 
     override suspend fun complete() {
@@ -95,22 +90,14 @@ class DelegatedDataAwarePlacer(
         }
 
         if (task == null && globalTask == null) {
-            val chosenQueue = multiQueueWait(queue, busiestPlacer!!.globalQueue)
-            if (chosenQueue == queue) {
-                task = queue.next()
-            } else {
-                globalTask = busiestPlacer!!.globalQueue.next()
+            select<Unit> {
+                queue.selectWait {
+                    task = queue.next()
+                }
+                busiestPlacer!!.globalQueue.selectWait {
+                    globalTask = busiestPlacer!!.globalQueue.next()
+                }
             }
-//            select {
-//                queue.onReceive {
-//                    task = queue.next()
-//                    task
-//                }
-//                busiestPlacer!!.globalQueue.onReceive {
-//                    globalTask = busiestPlacer.globalQueue.next()
-//                    globalTask
-//                }
-//            }
         }
 
         if (task != null) {

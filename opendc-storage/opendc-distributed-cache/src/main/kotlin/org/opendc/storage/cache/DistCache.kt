@@ -47,7 +47,6 @@ class DistCache : CliktCommand() {
     val watermarks: Pair<Double, Double> by option().double().pair().default(Pair(0.6, 0.9))
     val manualscalerEnabled: Boolean by option().flag(default=false)
     val manualOptions: Triple<Long, Long, Long> by option().long().triple().default(Triple(4000000, 11, 22))
-    val builtinscalerEnabled: Boolean by option().flag(default=false)
     // Work stealing options
     val workstealEnabled: Boolean by option().flag(default=false)
     // Minimize movement for centralized algos
@@ -124,7 +123,7 @@ class DistCache : CliktCommand() {
             }
                 .onEach {
                     launch {
-                        delay(maxOf(it.submitTime - currentTime, 1))
+                        delay(it.submitTime - currentTime)
                         metricRecorder.recordSubmission(it)
                         scheduler.offerTask(it)
                     }
@@ -141,13 +140,13 @@ class DistCache : CliktCommand() {
                 .onEach {
                     lastTask = it
                     launch {
-                        delay(maxOf(it.submitTime - currentTime, 1) + warmupDelay)
+                        delay(it.submitTime - currentTime + warmupDelay)
                         metricRecorder.recordSubmission(it)
                         scheduler.offerTask(it)
                     }
                 }
                 .onCompletion {
-                    delay(lastTask!!.submitTime - currentTime + 1000 + warmupDelay)
+                    delay(lastTask!!.submitTime - currentTime + 999 + warmupDelay)
 
                     // Need to stop timed events like autoscaling before the scheduler
                     metricRecorder.complete()
@@ -164,12 +163,10 @@ class DistCache : CliktCommand() {
                 allFlows.add(placerFlow)
             }
 
-            if (autoscalerEnabled)
-                metricRecorder.addCallback{ autoscaler.autoscale() }
-            else if (manualscalerEnabled)
-                allFlows.add(manualScaler.manualFlow)
-            else if (builtinscalerEnabled)
-                objectPlacer.registerAutoscaler(autoscaler)
+//            if (autoscalerEnabled)
+//                metricRecorder.addCallback{ autoscaler.autoscale() }
+//            else if (manualscalerEnabled)
+//                allFlows.add(manualScaler.manualFlow)
 
             allFlows.merge().collect()
         }
@@ -184,9 +181,10 @@ class DistCache : CliktCommand() {
         } else if (name == "random") {
             return RandomObjectPlacer()
         } else if (name == "centralized") {
-            return CentralizedDataAwarePlacer(1.seconds, minMovement)
+            return CentralizedDataAwarePlacer(1.seconds, minMovement, workstealEnabled)
         } else if (name == "delegated") {
-            return DelegatedDataAwarePlacer(10.seconds, 5, minMovement)
+            val subPlacers = List(5) { _ -> CentralizedDataAwarePlacer(1.seconds, minMovement, workstealEnabled) }
+            return DelegatedDataAwarePlacer(10.seconds, subPlacers, workstealEnabled)
         }
 
         // Beamer is missing

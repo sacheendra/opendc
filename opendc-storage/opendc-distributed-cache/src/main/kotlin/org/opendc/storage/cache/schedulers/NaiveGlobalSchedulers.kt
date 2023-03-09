@@ -10,7 +10,6 @@ import org.opendc.storage.cache.TaskScheduler
 class GreedyObjectPlacer: ObjectPlacer {
 
     override lateinit var scheduler: TaskScheduler
-    override var autoscaler: Autoscaler? = null
     val globalQueue = ChannelQueue(null)
 
     override fun addHosts(hosts: List<CacheHost>) {} // Not necessary
@@ -27,7 +26,7 @@ class GreedyObjectPlacer: ObjectPlacer {
 
     override suspend fun getNextTask(host: CacheHost): CacheTask? {
         var task = globalQueue.next()
-
+//println(host.hostId)
         if (task == null) {
             globalQueue.wait()
             task = globalQueue.next()
@@ -48,7 +47,6 @@ class GreedyObjectPlacer: ObjectPlacer {
 class RandomObjectPlacer: ObjectPlacer {
 
     override lateinit var scheduler: TaskScheduler
-    override var autoscaler: Autoscaler? = null
     fun getNode(): CacheHost {
         return scheduler.hosts.random()
     }

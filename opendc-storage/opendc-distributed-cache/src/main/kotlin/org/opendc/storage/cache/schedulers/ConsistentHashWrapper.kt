@@ -13,7 +13,6 @@ class ConsistentHashWrapper(
 ): ObjectPlacer {
 
     override lateinit var scheduler: TaskScheduler
-    override var autoscaler: Autoscaler? = null
     fun getNode(key: Long): CacheHost {
         return chash.getNode(key.toString()) as CacheHost
     }

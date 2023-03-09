@@ -9,7 +9,6 @@ import org.opendc.storage.cache.CacheHost
 import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.ChannelQueue
 import org.opendc.storage.cache.TaskScheduler
-import org.opendc.storage.cache.multiQueueWait
 import java.util.PriorityQueue
 import kotlin.math.roundToInt
 import kotlin.system.exitProcess
@@ -25,7 +24,6 @@ class CentralizedDataAwarePlacer(
 ): ObjectPlacer {
 
     override lateinit var scheduler: TaskScheduler
-    override var autoscaler: Autoscaler? = null
 
     val keyToNodeMap = mutableMapOf<Long, CacheHost>()
     val nodeToKeysMap = mutableMapOf<CacheHost, MutableList<Long>>()
@@ -108,23 +106,14 @@ class CentralizedDataAwarePlacer(
         }
 
         if (task == null && globalTask == null) {
-            val chosenQueue = multiQueueWait(queue, globalQueue)
-//            exitProcess(1)
-            if (chosenQueue == queue) {
-                task = queue.next()
-            } else {
-                globalTask = globalQueue.next()
+            select<Unit> {
+                queue.selectWait {
+                    task = queue.next()
+                }
+                globalQueue.selectWait {
+                    globalTask = globalQueue.next()
+                }
             }
-//            select {
-//                queue.onReceive {
-//                    task = queue.next()
-//                    task
-//                }
-//                globalQueue.onReceive {
-//                    globalTask = globalQueue.next()
-//                    globalTask
-//                }
-//            }
         }
 
         if (task != null) {
@@ -174,6 +163,7 @@ class CentralizedDataAwarePlacer(
         return frozen
     }
 
+    var prevTargetScores: Map<Int, Double>? = null
     fun rebalance(targetScorePerHostInp: Map<Int, Double>?) {
         // Maybe there is no need to normalize
 //        val totalKeyScore = perKeyScore.values.sum().toDouble()
@@ -185,11 +175,14 @@ class CentralizedDataAwarePlacer(
         /*
             Currently moving heaviest objects first, try moving lightest objects first
          */
-        val targetScorePerHost = if (targetScorePerHostInp == null) {
+        val targetScorePerHost: Map<Int, Double> = if (targetScorePerHostInp != null) {
+            prevTargetScores = targetScorePerHostInp
+            targetScorePerHostInp
+        } else if(prevTargetScores != null) {
+            prevTargetScores as Map<Int, Double>
+        } else {
             val avgScorePerHost = 1.0 / scheduler.hosts.size
             scheduler.hosts.map { it.hostId }.associateWith { avgScorePerHost }
-        } else {
-            targetScorePerHostInp
         }
 
         // Groupby preserves order according to the docs
