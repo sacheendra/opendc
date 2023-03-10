@@ -10,14 +10,17 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.pair
 import com.github.ajalt.clikt.parameters.options.triple
 import com.github.ajalt.clikt.parameters.types.double
+import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.long
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.skip
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import org.apache.parquet.hadoop.ParquetFileWriter
@@ -51,6 +54,9 @@ class DistCache : CliktCommand() {
     val workstealEnabled: Boolean by option().flag(default=false)
     // Minimize movement for centralized algos
     val minMovement: Boolean by option().flag(default=true)
+    val rebalanceEnabled: Boolean by option().flag(default=false)
+    val rebalanceInterval: Int by option().int().default(1)
+    val rebalanceIntervalDelegation: Int by option().int().default(10)
     // Indirection based load balancing options
     // Indirection based autoscaling options
     // Prefetching options
@@ -82,7 +88,6 @@ class DistCache : CliktCommand() {
             }
             // Setup scheduler
             val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10)
-            val placerFlow = objectPlacer.getPlacerFlow()
             val scheduler = TaskScheduler(objectPlacer)
 
             // Setup hosts
@@ -127,7 +132,7 @@ class DistCache : CliktCommand() {
                         metricRecorder.recordSubmission(it)
                         scheduler.offerTask(it)
                     }
-                }.take(8000*120)
+                }.drop(8000*120)
 
             var lastTask: CacheTask? = null
             val inputFlow = flow {
@@ -159,14 +164,15 @@ class DistCache : CliktCommand() {
             val allFlows = mutableListOf(addHostsFlow, warmupFlow, inputFlow, writeTaskFlow,
                 metricRecorder.metricsFlow)
 
-            if (placerFlow != null) {
+            val placerFlow = objectPlacer.getPlacerFlow()
+            if (rebalanceEnabled && placerFlow != null) {
                 allFlows.add(placerFlow)
             }
 
-//            if (autoscalerEnabled)
-//                metricRecorder.addCallback{ autoscaler.autoscale() }
-//            else if (manualscalerEnabled)
-//                allFlows.add(manualScaler.manualFlow)
+            if (autoscalerEnabled)
+                metricRecorder.addCallback{ autoscaler.autoscale() }
+            else if (manualscalerEnabled)
+                allFlows.add(manualScaler.manualFlow)
 
             allFlows.merge().collect()
         }
@@ -181,10 +187,10 @@ class DistCache : CliktCommand() {
         } else if (name == "random") {
             return RandomObjectPlacer()
         } else if (name == "centralized") {
-            return CentralizedDataAwarePlacer(1.seconds, minMovement, workstealEnabled)
+            return CentralizedDataAwarePlacer(rebalanceInterval.seconds, minMovement, workstealEnabled)
         } else if (name == "delegated") {
-            val subPlacers = List(5) { _ -> CentralizedDataAwarePlacer(1.seconds, minMovement, workstealEnabled) }
-            return DelegatedDataAwarePlacer(10.seconds, subPlacers, workstealEnabled)
+            val subPlacers = List(5) { _ -> CentralizedDataAwarePlacer(rebalanceInterval.seconds, minMovement, workstealEnabled) }
+            return DelegatedDataAwarePlacer(rebalanceIntervalDelegation.seconds, subPlacers)
         }
 
         // Beamer is missing

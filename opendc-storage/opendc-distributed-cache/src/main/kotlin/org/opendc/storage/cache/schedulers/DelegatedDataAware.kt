@@ -15,7 +15,6 @@ import kotlin.time.Duration
 class DelegatedDataAwarePlacer(
     val period: Duration,
     val subPlacers: List<CentralizedDataAwarePlacer>,
-    val stealWork: Boolean = false,
     val moveSmallestFirst: Boolean = false,
     val lookBackward: Boolean = false, // to implement
     val minimizeSpread: Boolean = false, // to implement
