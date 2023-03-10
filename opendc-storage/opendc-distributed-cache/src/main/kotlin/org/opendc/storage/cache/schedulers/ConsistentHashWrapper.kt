@@ -42,10 +42,10 @@ class ConsistentHashWrapper(
                 val chosenQueue = scheduler.hostQueues.values
                     .maxWith{a, b -> a.q.size - b.q.size}
                 if (chosenQueue.q.size > 5) {
-                    val task = chosenQueue.next()!!
-                    task.stolen = true
-                    task.hostId = host.hostId
-                    return task
+                    val globalTask = chosenQueue.next()!!
+                    globalTask.stolen = true
+                    globalTask.hostId = globalTask.hostId
+                    return globalTask
                 }
             }
 

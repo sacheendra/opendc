@@ -165,12 +165,10 @@ class CentralizedDataAwarePlacer(
 
     var prevTargetScores: Map<Int, Double>? = null
     fun rebalance(targetScorePerHostInp: Map<Int, Double>?) {
-        // Maybe there is no need to normalize
-//        val totalKeyScore = perKeyScore.values.sum().toDouble()
-//        val normalizedPerKeyScore = perKeyScore.mapValues {
-//            it.value / totalKeyScore
-//        }.toList().map { KeyScorePair(it.first, it.second) }.sortedBy { it.score }
-        val normalizedPerKeyScore = perKeyScore.toList().map { KeyScorePair(it.first, it.second) }.sortedBy { it.score }
+        val totalKeyScore = perKeyScore.values.sum().toDouble()
+        val normalizedPerKeyScore = perKeyScore.mapValues {
+            it.value / totalKeyScore
+        }.toList().map { KeyScorePair(it.first, it.second) }.sortedBy { it.score }
         perKeyScore.clear()
         /*
             Currently moving heaviest objects first, try moving lightest objects first
@@ -188,6 +186,7 @@ class CentralizedDataAwarePlacer(
         // Groupby preserves order according to the docs
         val perHostKeys: Map<CacheHost?, KeyList> = normalizedPerKeyScore.groupBy { keyToNodeMap[it.objectId] }
         val unallocatedKeys = perHostKeys.getOrDefault(null, listOf())
+        @Suppress("UNCHECKED_CAST")
         val allocatedPerHost = perHostKeys.filter { it.key != null } as Map<CacheHost, KeyList>
 
         val (keysToAllocate, perHostScores) = if (minMovement && allocatedPerHost.isNotEmpty()) {
@@ -205,7 +204,7 @@ class CentralizedDataAwarePlacer(
                     entry.value
                 }
 
-                val targetScore = targetScorePerHost[entry.key.hostId]!!
+                val targetScore = targetScorePerHost.getOrDefault(entry.key.hostId, 0.0)
                 var currentScore = 0.0
                 var cutOffIndex = 0
                 for (it in keyList.withIndex()) {
@@ -242,6 +241,6 @@ class CentralizedDataAwarePlacer(
 
 data class KeyScorePair(
     val objectId: Long,
-    val score: Int
+    val score: Double
 )
 typealias KeyList = List<KeyScorePair>

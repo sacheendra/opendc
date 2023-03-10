@@ -1,5 +1,6 @@
 package org.opendc.storage.cache
 
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ChannelResult
@@ -122,6 +123,7 @@ class ChannelQueue(h: CacheHost?) {
     val selectWait: SelectClause1<ChannelResult<Unit>>
         get() = c.onReceiveCatching
 
+    @OptIn(DelicateCoroutinesApi::class)
     suspend fun pleaseNotify() {
         if (!c.isClosedForReceive) c.trySend(Unit)
     }

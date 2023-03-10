@@ -94,7 +94,7 @@ class DelegatedDataAwarePlacer(
                     task = queue.next()
                 }
                 busiestPlacer!!.globalQueue.selectWait {
-                    globalTask = busiestPlacer!!.globalQueue.next()
+                    globalTask = busiestPlacer.globalQueue.next()
                 }
             }
         }
@@ -134,14 +134,15 @@ class DelegatedDataAwarePlacer(
         val nodeToPlacer: MutableMap<Int?, MutableList<PlacerScorePair>> = mutableMapOf()
         perPlacerNodeScores.forEach { placer ->
             placer.value.forEach { entry ->
-                val placerList = nodeToPlacer.getOrDefault(entry.key, mutableListOf())
+                val placerList = nodeToPlacer.computeIfAbsent(entry.key) { _ -> mutableListOf() }
                 (0 until choppedParts).forEach { _ ->
                     placerList.add(PlacerScorePair(placer.index, entry.value.toDouble() / choppedParts))
                 }
             }
         }
 
-        val unallocatedClaims = nodeToPlacer.getOrDefault(null, listOf()).toMutableList()
+        val unallocatedClaims = nodeToPlacer.getOrDefault(null, mutableListOf())
+        @Suppress("UNCHECKED_CAST")
         val requestedClaims: Map<Int, List<PlacerScorePair>> = nodeToPlacer.filter { it.key != null } as Map<Int, List<PlacerScorePair>>
 
         // Trim allocations to average score per node
@@ -185,14 +186,20 @@ class DelegatedDataAwarePlacer(
             val hostIdx = it.first
             val placerList = it.second.placerList
             placerList.forEach { pspair ->
-                val hostMap = placerToNodeAllocs.getOrDefault(pspair.placer, mutableMapOf())
+                val hostMap = placerToNodeAllocs.computeIfAbsent(pspair.placer) { _ -> mutableMapOf() }
                 val hostScore = hostMap.getOrDefault(hostIdx, 0.0)
                 hostMap[hostIdx] = hostScore + pspair.score
             }
         }
 
         for (placer in subPlacers.withIndex()) {
-            placer.value.rebalance(placerToNodeAllocs[placer.index])
+            // Need to normalize as each subplacer expects allocations that sum to 1
+            val nodeAllocs = placerToNodeAllocs[placer.index]
+            if (nodeAllocs != null) {
+                val placerScore = nodeAllocs.values.sum()
+                val normalizedAllocs = nodeAllocs.mapValues { it.value / placerScore }
+                placer.value.rebalance(normalizedAllocs)
+            }
         }
     }
 
