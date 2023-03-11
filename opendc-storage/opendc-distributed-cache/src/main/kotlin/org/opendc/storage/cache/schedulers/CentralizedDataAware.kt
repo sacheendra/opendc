@@ -11,7 +11,6 @@ import org.opendc.storage.cache.ChannelQueue
 import org.opendc.storage.cache.TaskScheduler
 import java.util.PriorityQueue
 import kotlin.math.roundToInt
-import kotlin.system.exitProcess
 import kotlin.time.Duration
 
 class CentralizedDataAwarePlacer(
@@ -26,7 +25,13 @@ class CentralizedDataAwarePlacer(
     override lateinit var scheduler: TaskScheduler
 
     val keyToNodeMap = mutableMapOf<Long, CacheHost>()
-    val nodeToKeysMap = mutableMapOf<CacheHost, MutableList<Long>>()
+    val nodeToKeysMap = mutableMapOf<CacheHost, MutableSet<Long>>()
+
+    fun mapKey(key: Long, host: CacheHost) {
+        keyToNodeMap[key] = host
+        nodeToKeysMap[host]!!.add(key)
+    }
+
     val globalQueue = ChannelQueue(null)
 
     val perNodeScore = mutableMapOf<Int?, Int>()
@@ -49,21 +54,9 @@ class CentralizedDataAwarePlacer(
         return ogSize - lateBindingSizeCorrection
     }
 
-    fun getNode(key: Long): CacheHost? {
-        return keyToNodeMap.getOrElse(key) {
-            val emptyNodes = scheduler.hostQueues.filter { it.value.q.size == 0 }
-            return if (emptyNodes.size > 0) {
-                emptyNodes.toList().random().second.host
-            } else {
-                // Adds the task to the global queue which will then be pulled
-                null
-            }
-        }
-    }
-
     override fun addHosts(hosts: List<CacheHost>) {
         for(host in hosts) {
-            nodeToKeysMap[host] = mutableListOf()
+            nodeToKeysMap[host] = mutableSetOf()
         }
     }
 
@@ -127,10 +120,10 @@ class CentralizedDataAwarePlacer(
             if (globalTask!!.objectId in keyToNodeMap) {
                 globalTask!!.stolen = true
                 if (moveOnSteal) {
-                    keyToNodeMap[globalTask!!.objectId] = host
+                    mapKey(globalTask!!.objectId, host)
                 }
             } else {
-                keyToNodeMap[globalTask!!.objectId] = host
+                mapKey(globalTask!!.objectId, host)
             }
             return globalTask
         }
@@ -139,13 +132,19 @@ class CentralizedDataAwarePlacer(
     }
 
     override suspend fun offerTask(task: CacheTask) {
+        task.hostId = -1 // Need to do this as this might be relocated task
+
         perKeyScore.merge(task.objectId, 1, Int::plus)
-        val host = getNode(task.objectId)
+        val host = keyToNodeMap[task.objectId]
         if (host != null) {
             val chosenHostId = host.hostId
-            val queue = scheduler.hostQueues[chosenHostId]!!
+            val queueOption = scheduler.hostQueues[chosenHostId]
+            if (queueOption == null) {
+                println(host.hostId)
+                println(task.objectId)
+            }
+            val queue = queueOption!!
 
-            task.hostId = -1 // Need to do this as this might be relocated task
             queue.add(task)
             perNodeScore.merge(chosenHostId, 1, Int::plus)
             if (stealWork) {
@@ -233,7 +232,7 @@ class CentralizedDataAwarePlacer(
             val minHostPair = hostMinHeap.poll()
             val newPair = minHostPair.copy(second = minHostPair.second+e.score)
             hostMinHeap.add(newPair)
-            keyToNodeMap[e.objectId] = minHostPair.first
+            mapKey(e.objectId, minHostPair.first)
         }
     }
 

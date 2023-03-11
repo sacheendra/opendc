@@ -16,6 +16,7 @@ class DelegatedDataAwarePlacer(
     val period: Duration,
     val subPlacers: List<CentralizedDataAwarePlacer>,
     val moveSmallestFirst: Boolean = false,
+    val moveOnSteal: Boolean = false,
     val lookBackward: Boolean = false, // to implement
     val minimizeSpread: Boolean = false, // to implement
 ): ObjectPlacer {
@@ -108,8 +109,11 @@ class DelegatedDataAwarePlacer(
             globalTask!!.hostId = host.hostId
             if (globalTask!!.objectId in busiestPlacer!!.keyToNodeMap) {
                 globalTask!!.stolen = true
+                if (moveOnSteal) {
+                    busiestPlacer.mapKey(globalTask!!.objectId, host)
+                }
             } else {
-                busiestPlacer.keyToNodeMap[globalTask!!.objectId] = host
+                busiestPlacer.mapKey(globalTask!!.objectId, host)
             }
             return globalTask
         }

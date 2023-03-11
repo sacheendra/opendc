@@ -93,7 +93,6 @@ class ChannelQueue(h: CacheHost?) {
     val q: PriorityQueue<CacheTask> = PriorityQueue { a, b -> (a.submitTime - b.submitTime).toInt() }
 
     private var closed: Boolean = false
-    val host: CacheHost? = h
 
     suspend fun close() {
         closed = true
