@@ -67,6 +67,9 @@ class TaskScheduler(
             for (task in queue.q) {
                 this.offerTask(task)
             }
+            // Need to close the queue to shut the node down
+            // The node get shut down by the notification or when it requests a new task
+            queue.close()
         }
     }
 

@@ -35,9 +35,12 @@ import org.opendc.storage.cache.schedulers.RandomObjectPlacer
 import org.opendc.trace.util.parquet.LocalParquetReader
 import org.opendc.trace.util.parquet.LocalParquetWriter
 import java.nio.file.Paths
+import java.time.InstantSource
 import kotlin.IllegalArgumentException
+import kotlin.time.AbstractLongTimeSource
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.ExperimentalTime
 
 fun main(args: Array<String>) = DistCache().main(args)
 
@@ -87,7 +90,7 @@ class DistCache : CliktCommand() {
                 11
             }
             // Setup scheduler
-            val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10)
+            val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10, timeSource)
             val scheduler = TaskScheduler(objectPlacer)
 
             // Setup hosts
@@ -181,15 +184,15 @@ class DistCache : CliktCommand() {
         println("OK!")
     }
 
-    fun mapPlacementAlgoName(name: String, size: Int): ObjectPlacer {
+    fun mapPlacementAlgoName(name: String, size: Int, timeSource: InstantSource): ObjectPlacer {
         if (name == "greedy") {
             return GreedyObjectPlacer()
         } else if (name == "random") {
             return RandomObjectPlacer()
         } else if (name == "centralized") {
-            return CentralizedDataAwarePlacer(rebalanceInterval.seconds, minMovement, workstealEnabled)
+            return CentralizedDataAwarePlacer(rebalanceInterval.seconds, timeSource, minMovement, workstealEnabled)
         } else if (name == "delegated") {
-            val subPlacers = List(5) { _ -> CentralizedDataAwarePlacer(rebalanceInterval.seconds, minMovement, workstealEnabled) }
+            val subPlacers = List(5) { _ -> CentralizedDataAwarePlacer(rebalanceInterval.seconds, timeSource, minMovement, workstealEnabled) }
             return DelegatedDataAwarePlacer(rebalanceIntervalDelegation.seconds, subPlacers)
         }
 

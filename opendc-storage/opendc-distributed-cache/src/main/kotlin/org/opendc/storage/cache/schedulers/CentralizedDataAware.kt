@@ -9,12 +9,15 @@ import org.opendc.storage.cache.CacheHost
 import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.ChannelQueue
 import org.opendc.storage.cache.TaskScheduler
+import java.time.InstantSource
 import java.util.PriorityQueue
 import kotlin.math.roundToInt
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 
 class CentralizedDataAwarePlacer(
     val period: Duration,
+    val clock: InstantSource,
     val minMovement: Boolean = true,
     val stealWork: Boolean = false,
     val moveSmallestFirst: Boolean = false,
@@ -24,11 +27,11 @@ class CentralizedDataAwarePlacer(
 
     override lateinit var scheduler: TaskScheduler
 
-    val keyToNodeMap = mutableMapOf<Long, CacheHost>()
+    val keyToNodeMap = mutableMapOf<Long, HostEnTime>()
     val nodeToKeysMap = mutableMapOf<CacheHost, MutableSet<Long>>()
 
     fun mapKey(key: Long, host: CacheHost) {
-        keyToNodeMap[key] = host
+        keyToNodeMap[key] = HostEnTime(host, clock.millis())
         nodeToKeysMap[host]!!.add(key)
     }
 
@@ -135,15 +138,20 @@ class CentralizedDataAwarePlacer(
         task.hostId = -1 // Need to do this as this might be relocated task
 
         perKeyScore.merge(task.objectId, 1, Int::plus)
-        val host = keyToNodeMap[task.objectId]
-        if (host != null) {
-            val chosenHostId = host.hostId
-            val queueOption = scheduler.hostQueues[chosenHostId]
-            if (queueOption == null) {
-                println(host.hostId)
-                println(task.objectId)
+        val keyEntry = keyToNodeMap[task.objectId]
+        if (keyEntry != null) {
+            // Reset every five minutes to support location reset when not rebalancing
+            if (clock.millis() - keyEntry.time > 5.minutes.inWholeMilliseconds) {
+                keyToNodeMap.remove(task.objectId)
+                nodeToKeysMap[keyEntry.host]!!.remove(task.objectId)
+
+                perNodeScore.merge(null, 1, Int::plus)
+                globalQueue.add(task)
+                return
             }
-            val queue = queueOption!!
+
+            val chosenHostId = keyEntry.host.hostId
+            val queue = scheduler.hostQueues[chosenHostId]!!
 
             queue.add(task)
             perNodeScore.merge(chosenHostId, 1, Int::plus)
@@ -183,7 +191,7 @@ class CentralizedDataAwarePlacer(
         }
 
         // Groupby preserves order according to the docs
-        val perHostKeys: Map<CacheHost?, KeyList> = normalizedPerKeyScore.groupBy { keyToNodeMap[it.objectId] }
+        val perHostKeys: Map<CacheHost?, KeyList> = normalizedPerKeyScore.groupBy { keyToNodeMap[it.objectId]?.host }
         val unallocatedKeys = perHostKeys.getOrDefault(null, listOf())
         @Suppress("UNCHECKED_CAST")
         val allocatedPerHost = perHostKeys.filter { it.key != null } as Map<CacheHost, KeyList>
@@ -243,3 +251,8 @@ data class KeyScorePair(
     val score: Double
 )
 typealias KeyList = List<KeyScorePair>
+
+data class HostEnTime(
+    val host: CacheHost,
+    val time: Long
+)
