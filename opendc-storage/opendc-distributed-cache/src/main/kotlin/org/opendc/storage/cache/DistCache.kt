@@ -67,6 +67,8 @@ class DistCache : CliktCommand() {
     override fun run() {
 
         val start = System.currentTimeMillis()
+        val runtime = Runtime.getRuntime()
+        var usedMemory = 0.0
         runSimulation {
 
             // Setup remote storage
@@ -114,6 +116,7 @@ class DistCache : CliktCommand() {
                     }
                 }
                 .onCompletion {
+                    usedMemory = (runtime.totalMemory() - runtime.freeMemory()) / 1073741824.0
                     resultWriter.close()
                 }
 
@@ -181,6 +184,7 @@ class DistCache : CliktCommand() {
         }
         val end = System.currentTimeMillis()
         println((end - start) / 1000.0)
+        println(usedMemory)
         println("OK!")
     }
 

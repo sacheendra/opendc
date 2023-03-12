@@ -35,6 +35,19 @@ class CentralizedDataAwarePlacer(
         nodeToKeysMap[host]!!.add(key)
     }
 
+    fun pruneKeys() {
+        val thresholdTime = clock.millis() - 5.minutes.inWholeMilliseconds
+        val iter = keyToNodeMap.iterator()
+        while(iter.hasNext()) {
+            val entry = iter.next()
+            if (entry.value.time < thresholdTime) {
+                iter.remove()
+                nodeToKeysMap[entry.value.host]!!.remove(entry.key)
+            }
+        }
+    }
+    var lastPruning = clock.millis()
+
     val globalQueue = ChannelQueue(null)
 
     val perNodeScore = mutableMapOf<Int?, Int>()
@@ -44,6 +57,14 @@ class CentralizedDataAwarePlacer(
     val thisFlow = flow<Unit> {
         delay(period)
         while (!complete) {
+            val currentTime = clock.millis()
+            if (currentTime - lastPruning > 5.minutes.inWholeMilliseconds) {
+                // Prune keys that haven't been used in a long time first
+                // MAYBE Place keys in heap sorted by insert time
+                pruneKeys()
+                lastPruning = currentTime
+            }
+
             rebalance(null)
             getPerNodeScores()
             emit(Unit)
