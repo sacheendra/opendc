@@ -138,6 +138,9 @@ class DelegatedDataAwarePlacer(
         val totalScore = perPlacerNodeScores.sumOf { it.value.values.sum() }.toDouble()
         val scorePerNode = totalScore / scheduler.hosts.size
 
+//        println("placer counts")
+//        println(perPlacerNodeScores)
+
         val nodeToPlacer: MutableMap<Int?, MutableList<PlacerScorePair>> = mutableMapOf()
         perPlacerNodeScores.forEach { placer ->
             placer.value.forEach { entry ->
@@ -153,13 +156,18 @@ class DelegatedDataAwarePlacer(
         val requestedClaims: Map<Int, List<PlacerScorePair>> = nodeToPlacer.filter { it.key != null } as Map<Int, List<PlacerScorePair>>
 
         // Trim allocations to average score per node
-        val allocatedClaims = requestedClaims.mapValues { entry ->
+        val allocatedClaims = scheduler.hosts.map { host ->
+            val rawPlacerList = requestedClaims[host.hostId]
+            if (rawPlacerList == null) {
+                return@map host.hostId to PlacerListScorePair(mutableListOf(), 0.0)
+            }
+
             // First values are retained, later values moves
             // Hence, largest value first to move small values
             val placerList = if (moveSmallestFirst) {
-                entry.value.sortedByDescending { it.score }
+                rawPlacerList.sortedByDescending { it.score }
             } else {
-                entry.value.sortedBy { it.score }
+                rawPlacerList.sortedBy { it.score }
             }
 
             var currentScore = 0.0
@@ -175,11 +183,11 @@ class DelegatedDataAwarePlacer(
             val toReturn = placerList.subList(0, cutOffIndex+1)
             unallocatedClaims.addAll(placerList.subList(cutOffIndex+1, placerList.size))
 
-            PlacerListScorePair(toReturn.toMutableList(), currentScore)
+            host.hostId to PlacerListScorePair(toReturn.toMutableList(), currentScore)
         }
 
         val hostMinHeap: PriorityQueue<Pair<Int, PlacerListScorePair>> = PriorityQueue { a, b -> (a.second.score - b.second.score).roundToInt() }
-        hostMinHeap.addAll(allocatedClaims.toList())
+        hostMinHeap.addAll(allocatedClaims)
 
         for (e in unallocatedClaims.sortedByDescending { it.score }) {
             val minHostPair = hostMinHeap.poll()

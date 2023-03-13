@@ -85,6 +85,8 @@ class CentralizedDataAwarePlacer(
 
     override fun removeHosts(hosts: List<CacheHost>) {
         for (host in hosts) {
+            val score = perNodeScore.remove(host.hostId)!!
+            perNodeScore.merge(null, score, Int::plus)
             for (key in nodeToKeysMap.remove(host)!!) {
                 keyToNodeMap.remove(key)
             }
