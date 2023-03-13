@@ -62,8 +62,8 @@ class DelegatedDataAwarePlacer(
         }
     }
 
-    override fun getPlacerFlow(): Flow<TimeCountPair>? {
-        val subPlacerFlows = subPlacers.mapNotNull { it.getPlacerFlow() }
+    override fun getPlacerFlow(): Flow<TimeCountPair> {
+        val subPlacerFlows = subPlacers.map { it.getPlacerFlow() }
         return subPlacerFlows.plus(thisFlow).merge()
     }
 

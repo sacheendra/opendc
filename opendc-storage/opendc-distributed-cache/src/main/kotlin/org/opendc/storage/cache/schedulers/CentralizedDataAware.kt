@@ -91,7 +91,7 @@ class CentralizedDataAwarePlacer(
         }
     }
 
-    override fun getPlacerFlow(): Flow<TimeCountPair>? {
+    override fun getPlacerFlow(): Flow<TimeCountPair> {
         return thisFlow
     }
 
