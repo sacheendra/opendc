@@ -4,7 +4,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.selects.select
-import org.opendc.storage.cache.Autoscaler
 import org.opendc.storage.cache.CacheHost
 import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.ChannelQueue
@@ -54,7 +53,7 @@ class CentralizedDataAwarePlacer(
     val perKeyScore = mutableMapOf<Long, Int>()
 
     var complete = false
-    val thisFlow = flow<Unit> {
+    val thisFlow = flow<TimeCountPair> {
         delay(period)
         while (!complete) {
             val currentTime = clock.millis()
@@ -65,9 +64,9 @@ class CentralizedDataAwarePlacer(
                 lastPruning = currentTime
             }
 
-            rebalance(null)
-            getPerNodeScores()
-            emit(Unit)
+            val movedCount = rebalance(null)
+//            getPerNodeScores()
+            emit(TimeCountPair(currentTime, movedCount))
             delay(period)
         }
     }
@@ -92,7 +91,7 @@ class CentralizedDataAwarePlacer(
         }
     }
 
-    override fun getPlacerFlow(): Flow<Unit>? {
+    override fun getPlacerFlow(): Flow<TimeCountPair>? {
         return thisFlow
     }
 
@@ -192,7 +191,9 @@ class CentralizedDataAwarePlacer(
     }
 
     var prevTargetScores: Map<Int, Double>? = null
-    fun rebalance(targetScorePerHostInp: Map<Int, Double>?) {
+    fun rebalance(targetScorePerHostInp: Map<Int, Double>?): Int {
+        var movedCount = 0
+
         val totalKeyScore = perKeyScore.values.sum().toDouble()
         val normalizedPerKeyScore = perKeyScore.mapValues {
             it.value / totalKeyScore
@@ -247,6 +248,8 @@ class CentralizedDataAwarePlacer(
                 entry.key to currentScore
             }.toMap()
 
+            movedCount = removedKeys.size
+
             Pair(unallocatedKeys + removedKeys, finalHostsWithScores)
         } else {
             Pair(normalizedPerKeyScore, scheduler.hosts.associateWith { 0.0 })
@@ -263,6 +266,8 @@ class CentralizedDataAwarePlacer(
             hostMinHeap.add(newPair)
             mapKey(e.objectId, minHostPair.first)
         }
+
+        return movedCount
     }
 
 }

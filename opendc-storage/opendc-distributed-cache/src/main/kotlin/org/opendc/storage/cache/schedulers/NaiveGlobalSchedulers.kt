@@ -1,7 +1,6 @@
 package org.opendc.storage.cache.schedulers
 
 import kotlinx.coroutines.flow.Flow
-import org.opendc.storage.cache.Autoscaler
 import org.opendc.storage.cache.CacheHost
 import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.ChannelQueue
@@ -16,7 +15,7 @@ class GreedyObjectPlacer: ObjectPlacer {
 
     override fun removeHosts(hosts: List<CacheHost>) {} // Not necessary
 
-    override fun getPlacerFlow(): Flow<Unit>? {
+    override fun getPlacerFlow(): Flow<TimeCountPair>? {
         return null
     }
 
@@ -55,7 +54,7 @@ class RandomObjectPlacer: ObjectPlacer {
 
     override fun removeHosts(hosts: List<CacheHost>) {} // Not necessary
 
-    override fun getPlacerFlow(): Flow<Unit>? {
+    override fun getPlacerFlow(): Flow<TimeCountPair>? {
         return null
     }
 

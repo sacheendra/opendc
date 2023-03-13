@@ -20,8 +20,6 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.skip
-import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import org.apache.parquet.hadoop.ParquetFileWriter
 import org.apache.parquet.hadoop.metadata.CompressionCodecName
@@ -32,21 +30,21 @@ import org.opendc.storage.cache.schedulers.DelegatedDataAwarePlacer
 import org.opendc.storage.cache.schedulers.GreedyObjectPlacer
 import org.opendc.storage.cache.schedulers.ObjectPlacer
 import org.opendc.storage.cache.schedulers.RandomObjectPlacer
+import org.opendc.storage.cache.schedulers.TimeCountWriteSupport
 import org.opendc.trace.util.parquet.LocalParquetReader
 import org.opendc.trace.util.parquet.LocalParquetWriter
+import java.nio.file.Files
 import java.nio.file.Paths
 import java.time.InstantSource
 import kotlin.IllegalArgumentException
-import kotlin.time.AbstractLongTimeSource
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
-import kotlin.time.ExperimentalTime
 
 fun main(args: Array<String>) = DistCache().main(args)
 
 class DistCache : CliktCommand() {
     val inputFile: String by argument(help="Input trace file path")
-    val outputFile: String by argument(help="Output result file path")
+    val outputFolder: String by argument(help="Output result file path")
     val placementAlgo: String by argument(help="Object placement algorithm")
     // Autoscaler options
     val autoscalerEnabled: Boolean by option().flag(default=false)
@@ -74,9 +72,11 @@ class DistCache : CliktCommand() {
             // Setup remote storage
             val remoteStorage = RemoteStorage()
 
+            val outputFolderPath = Paths.get(outputFolder)
+            Files.createDirectories(outputFolderPath)
+
             // Setup metrics recorder
-            val resultWritePath = Paths.get(outputFile)
-            val resultWriter = LocalParquetWriter.builder(resultWritePath, CacheTaskWriteSupport())
+            val resultWriter = LocalParquetWriter.builder(outputFolderPath.resolve("tasks.parquet"), CacheTaskWriteSupport())
                 .withCompressionCodec(CompressionCodecName.SNAPPY)
                 .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
                 .build()
@@ -172,7 +172,21 @@ class DistCache : CliktCommand() {
 
             val placerFlow = objectPlacer.getPlacerFlow()
             if (rebalanceEnabled && placerFlow != null) {
-                allFlows.add(placerFlow)
+                val rebalanceWriter = LocalParquetWriter.builder(outputFolderPath.resolve("moves.parquet"), TimeCountWriteSupport())
+                    .withCompressionCodec(CompressionCodecName.SNAPPY)
+                    .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+                    .build()
+                val rebalanceWriterFlow = placerFlow
+                    .onEach {
+                        if (it.time > warmupDelay) {
+                            it.time = it.time - warmupDelay
+                            rebalanceWriter.write(it)
+                        }
+                    }
+                    .onCompletion {
+                        rebalanceWriter.close()
+                    }
+                allFlows.add(rebalanceWriterFlow)
             }
 
             if (autoscalerEnabled)
@@ -197,7 +211,7 @@ class DistCache : CliktCommand() {
             return CentralizedDataAwarePlacer(rebalanceInterval.seconds, timeSource, minMovement, workstealEnabled)
         } else if (name == "delegated") {
             val subPlacers = List(5) { _ -> CentralizedDataAwarePlacer(rebalanceInterval.seconds, timeSource, minMovement, workstealEnabled) }
-            return DelegatedDataAwarePlacer(rebalanceIntervalDelegation.seconds, subPlacers)
+            return DelegatedDataAwarePlacer(rebalanceIntervalDelegation.seconds, timeSource, subPlacers)
         }
 
         // Beamer is missing

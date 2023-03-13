@@ -8,12 +8,14 @@ import kotlinx.coroutines.selects.select
 import org.opendc.storage.cache.CacheHost
 import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.TaskScheduler
+import java.time.InstantSource
 import java.util.PriorityQueue
 import kotlin.math.roundToInt
 import kotlin.time.Duration
 
 class DelegatedDataAwarePlacer(
     val period: Duration,
+    val clock: InstantSource,
     val subPlacers: List<CentralizedDataAwarePlacer>,
     val moveSmallestFirst: Boolean = false,
     val moveOnSteal: Boolean = false,
@@ -27,12 +29,12 @@ class DelegatedDataAwarePlacer(
     val hostList: MutableList<CacheHost> = mutableListOf()
 
     var complete = false
-    val thisFlow = flow<Unit> {
+    val thisFlow = flow<TimeCountPair> {
 
         delay(period)
         while (!complete) {
-            rebalance()
-            emit(Unit)
+            val movedCount = rebalance()
+            emit(TimeCountPair(clock.millis(), movedCount))
             delay(period)
         }
     }
@@ -60,7 +62,7 @@ class DelegatedDataAwarePlacer(
         }
     }
 
-    override fun getPlacerFlow(): Flow<Unit> {
+    override fun getPlacerFlow(): Flow<TimeCountPair>? {
         val subPlacerFlows = subPlacers.mapNotNull { it.getPlacerFlow() }
         return subPlacerFlows.plus(thisFlow).merge()
     }
@@ -127,7 +129,8 @@ class DelegatedDataAwarePlacer(
         placer.offerTask(task)
     }
 
-    fun rebalance() {
+    fun rebalance(): Int {
+        var movedCount = 0
         val choppedParts = 100
         // Calling getPerNodeScores is important to reset counters
         val perPlacerNodeScores = subPlacers.mapIndexed { idx, scores -> IndexedValue(idx, scores.getPerNodeScores()) }
@@ -202,9 +205,11 @@ class DelegatedDataAwarePlacer(
             if (nodeAllocs != null) {
                 val placerScore = nodeAllocs.values.sum()
                 val normalizedAllocs = nodeAllocs.mapValues { it.value / placerScore }
-                placer.value.rebalance(normalizedAllocs)
+                movedCount += placer.value.rebalance(normalizedAllocs)
             }
         }
+
+        return movedCount
     }
 
 }

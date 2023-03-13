@@ -2,7 +2,6 @@ package org.opendc.storage.cache.schedulers
 
 import ch.supsi.dti.isin.consistenthash.ConsistentHash
 import kotlinx.coroutines.flow.Flow
-import org.opendc.storage.cache.Autoscaler
 import org.opendc.storage.cache.CacheHost
 import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.TaskScheduler
@@ -25,7 +24,7 @@ class ConsistentHashWrapper(
         chash.removeNodes(hosts)
     }
 
-    override fun getPlacerFlow(): Flow<Unit>? {
+    override fun getPlacerFlow(): Flow<TimeCountPair>? {
         return null
     }
 
