@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.selects.select
 import org.opendc.storage.cache.CacheHost
 import org.opendc.storage.cache.CacheTask
+import org.opendc.storage.cache.TaskEvent
 import org.opendc.storage.cache.TaskScheduler
 import java.time.InstantSource
 import java.util.PriorityQueue
@@ -82,7 +83,7 @@ class DelegatedDataAwarePlacer(
 
         var task = queue.next()
         // Late binding check
-        while (task != null && task.hostId > 0) {
+        while (task != null && task.hostId >= 0) {
             task = queue.next()
         }
 
@@ -91,7 +92,8 @@ class DelegatedDataAwarePlacer(
             busiestPlacer = subPlacers.shuffled().take(2).maxBy { it.globalQueueSize() }
             task = busiestPlacer.globalQueue.next()
             // Late binding check
-            while (task != null && task.hostId > 0) {
+            while (task != null && task.hostId >= 0) {
+                task.callback?.invoke(TaskEvent.LATEBIND_TOMBSTONE)
                 task = busiestPlacer.globalQueue.next()
             }
 
@@ -112,7 +114,7 @@ class DelegatedDataAwarePlacer(
 
         if (task != null && !globalTask) {
             task.hostId = host.hostId
-            task.callback?.invoke()
+            task.callback?.invoke(TaskEvent.SCHEDULED_NOW)
             return task
         }
 
@@ -135,8 +137,14 @@ class DelegatedDataAwarePlacer(
     override suspend fun offerTask(task: CacheTask) {
         val placerIdx = (task.objectId % numPlacers).toInt()
         val placer = subPlacers[placerIdx]
-        task.callback = {
-            placer.lateBindingSizeCorrection++
+        task.callback = {event ->
+            // Use event to dynamically modify the size of global queue
+            // to account for late binding
+            if (event == TaskEvent.SCHEDULED_NOW) {
+                placer.lateBindingSizeCorrection++
+            } else if (event == TaskEvent.LATEBIND_TOMBSTONE) {
+                placer.lateBindingSizeCorrection--
+            }
         }
         placer.offerTask(task)
     }

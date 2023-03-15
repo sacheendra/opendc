@@ -28,8 +28,12 @@ data class CacheTask(
     var isHit: Boolean = true,
     var hostId: Int = -1,
     var storageDelay: Long = -1,
-    var callback: (() -> Unit)? = null
+    var callback: ((event: TaskEvent) -> Unit)? = null,
 )
+
+enum class TaskEvent {
+    SCHEDULED_NOW, LATEBIND_TOMBSTONE
+}
 
 class CacheTaskWriteSupport : WriteSupport<CacheTask>() {
     /**

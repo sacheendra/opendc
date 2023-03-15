@@ -108,7 +108,7 @@ class CentralizedDataAwarePlacer(
 
         var task = queue.next()
         // Late binding check
-        while (task != null && task.hostId > 0) {
+        while (task != null && task.hostId >= 0) {
             task = queue.next()
         }
 
@@ -117,7 +117,7 @@ class CentralizedDataAwarePlacer(
             // This is used both for new tasks and for workstealing
             globalTask = globalQueue.next()
             // Late binding check
-            while (globalTask != null && globalTask.hostId > 0) {
+            while (globalTask != null && globalTask.hostId >= 0) {
                 globalTask = globalQueue.next()
             }
         }
