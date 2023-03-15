@@ -78,46 +78,50 @@ class DelegatedDataAwarePlacer(
         val queue = scheduler.hostQueues[host.hostId]
         if (queue == null) return null // This means the node has been deleted
 
+        var globalTask = false
+
         var task = queue.next()
         // Late binding check
         while (task != null && task.hostId > 0) {
             task = queue.next()
         }
 
-        var globalTask: CacheTask? = null
         var busiestPlacer: CentralizedDataAwarePlacer? = null
         if (task == null) {
-            busiestPlacer = subPlacers.shuffled().subList(0, 2).maxBy { it.globalQueueSize() }
-            globalTask = busiestPlacer.globalQueue.next()
+            busiestPlacer = subPlacers.shuffled().take(2).maxBy { it.globalQueueSize() }
+            task = busiestPlacer.globalQueue.next()
+            globalTask = true
         }
 
-        if (task == null && globalTask == null) {
-            select<Unit> {
+        if (task == null) {
+            task = select<CacheTask?> {
                 queue.selectWait {
-                    task = queue.next()
+                    queue.next()
                 }
                 busiestPlacer!!.globalQueue.selectWait {
-                    globalTask = busiestPlacer.globalQueue.next()
+                    globalTask = true
+                    busiestPlacer.globalQueue.next()
                 }
             }
         }
 
-        if (task != null) {
-            task!!.hostId = host.hostId
+        if (task != null && !globalTask) {
+            task.hostId = host.hostId
+            task.callback?.invoke()
             return task
         }
 
-        if (globalTask != null) {
-            globalTask!!.hostId = host.hostId
-            if (globalTask!!.objectId in busiestPlacer!!.keyToNodeMap) {
-                globalTask!!.stolen = true
+        if (task != null && globalTask) {
+            task.hostId = host.hostId
+            if (task.objectId in busiestPlacer!!.keyToNodeMap) {
+                task.stolen = true
                 if (moveOnSteal) {
-                    busiestPlacer.mapKey(globalTask!!.objectId, host)
+                    busiestPlacer.mapKey(task.objectId, host)
                 }
             } else {
-                busiestPlacer.mapKey(globalTask!!.objectId, host)
+                busiestPlacer.mapKey(task.objectId, host)
             }
-            return globalTask
+            return task
         }
 
         return null
@@ -126,6 +130,9 @@ class DelegatedDataAwarePlacer(
     override suspend fun offerTask(task: CacheTask) {
         val placerIdx = (task.objectId % numSchedulers).toInt()
         val placer = subPlacers[placerIdx]
+        task.callback = {
+            placer.lateBindingSizeCorrection++
+        }
         placer.offerTask(task)
     }
 

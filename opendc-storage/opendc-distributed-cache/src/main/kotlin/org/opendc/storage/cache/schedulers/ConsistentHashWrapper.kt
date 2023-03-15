@@ -38,9 +38,9 @@ class ConsistentHashWrapper(
         if (task == null) {
             if (stealWork) {
                 // Work steal
-                val chosenQueue = scheduler.hostQueues.values
-                    .maxWith{a, b -> a.q.size - b.q.size}
-                if (chosenQueue.q.size > 5) {
+                val chosenQueue = scheduler.hostQueues.values.shuffled().take(2)
+                    .maxBy { it.q.size }
+                if (chosenQueue.q.size > 0) {
                     val globalTask = chosenQueue.next()!!
                     globalTask.stolen = true
                     globalTask.hostId = globalTask.hostId

@@ -28,6 +28,7 @@ data class CacheTask(
     var isHit: Boolean = true,
     var hostId: Int = -1,
     var storageDelay: Long = -1,
+    var callback: (() -> Unit)? = null
 )
 
 class CacheTaskWriteSupport : WriteSupport<CacheTask>() {

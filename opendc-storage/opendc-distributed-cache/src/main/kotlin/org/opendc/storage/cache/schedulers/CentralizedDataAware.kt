@@ -110,7 +110,6 @@ class CentralizedDataAwarePlacer(
         // Late binding check
         while (task != null && task.hostId > 0) {
             task = queue.next()
-            lateBindingSizeCorrection--
         }
 
         var globalTask: CacheTask? = null
@@ -135,7 +134,6 @@ class CentralizedDataAwarePlacer(
         }
 
         if (task != null) {
-            lateBindingSizeCorrection++
             task!!.hostId = host.hostId
             return task
         }
