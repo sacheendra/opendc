@@ -25,7 +25,7 @@ class DelegatedDataAwarePlacer(
 
     override lateinit var scheduler: TaskScheduler
 
-    val numSchedulers = subPlacers.size
+    val numPlacers = subPlacers.size
     val hostList: MutableList<CacheHost> = mutableListOf()
 
     var complete = false
@@ -90,7 +90,12 @@ class DelegatedDataAwarePlacer(
         if (task == null) {
             busiestPlacer = subPlacers.shuffled().take(2).maxBy { it.globalQueueSize() }
             task = busiestPlacer.globalQueue.next()
-            globalTask = true
+            // Late binding check
+            while (task != null && task.hostId > 0) {
+                task = busiestPlacer.globalQueue.next()
+            }
+
+            if (task != null) globalTask = true
         }
 
         if (task == null) {
@@ -128,7 +133,7 @@ class DelegatedDataAwarePlacer(
     }
 
     override suspend fun offerTask(task: CacheTask) {
-        val placerIdx = (task.objectId % numSchedulers).toInt()
+        val placerIdx = (task.objectId % numPlacers).toInt()
         val placer = subPlacers[placerIdx]
         task.callback = {
             placer.lateBindingSizeCorrection++
