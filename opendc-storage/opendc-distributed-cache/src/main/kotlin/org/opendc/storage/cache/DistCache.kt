@@ -51,6 +51,7 @@ class DistCache : CliktCommand() {
     val watermarks: Pair<Double, Double> by option().double().pair().default(Pair(0.6, 0.9))
     val manualscalerEnabled: Boolean by option().flag(default=false)
     val manualOptions: Triple<Long, Long, Long> by option().long().triple().default(Triple(4000000, 11, 22))
+    val initHosts: Int by option().int().default(11)
     // Work stealing options
     val workstealEnabled: Boolean by option().flag(default=false)
     // Minimize movement for centralized algos
@@ -58,6 +59,7 @@ class DistCache : CliktCommand() {
     val rebalanceEnabled: Boolean by option().flag(default=false)
     val rebalanceInterval: Int by option().int().default(1)
     val rebalanceIntervalDelegation: Int by option().int().default(10)
+    val concurrentTasks: Int by option().int().default(4)
     // Indirection based load balancing options
     // Indirection based autoscaling options
     // Prefetching options
@@ -89,7 +91,7 @@ class DistCache : CliktCommand() {
             val numHosts = if (manualscalerEnabled) {
                 manualOptions.second.toInt()
             } else {
-                11
+                initHosts
             }
             // Setup scheduler
             val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10, timeSource)
@@ -98,13 +100,13 @@ class DistCache : CliktCommand() {
             // Setup hosts
             val addHostsFlow = flow {
                 scheduler.addHosts((1..numHosts)
-                    .map { CacheHost(4, 100, timeSource, remoteStorage, scheduler, metricRecorder) })
+                    .map { CacheHost(concurrentTasks, 1000, timeSource, remoteStorage, scheduler, metricRecorder) })
                 emit(Unit)
             }
 
             // Setup autoscaler
             val autoscaler = Autoscaler(timeSource, remoteStorage, scheduler, metricRecorder, watermarks)
-            val manualScaler = ManualScaler(manualOptions.first + warmupDelay, manualOptions.third, scheduler, timeSource, remoteStorage, metricRecorder)
+            val manualScaler = ManualScaler(manualOptions.first + warmupDelay, manualOptions.third, concurrentTasks, scheduler, timeSource, remoteStorage, metricRecorder)
 
             // Write results for completed tasks
             val writeTaskFlow = scheduler.completedTaskFlow

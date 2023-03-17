@@ -11,7 +11,7 @@ import org.opendc.storage.cache.schedulers.GreedyObjectPlacer
 import java.time.InstantSource
 
 class CacheHost(
-    val numProcessingSlots: Int = 4,
+    val concurrentTasks: Int = 4,
     val numCacheSlots: Int = 1000,
     val clock: InstantSource,
     val remoteStorage: RemoteStorage,
@@ -34,7 +34,7 @@ class CacheHost(
         HashMap<Long, Boolean>()
     }
 
-    val freeProcessingSlots = Semaphore(numProcessingSlots)
+    val freeProcessingSlots = Semaphore(concurrentTasks)
 
     suspend fun processTasks(channel: SendChannel<CacheTask>) = coroutineScope {
         while(true) {
