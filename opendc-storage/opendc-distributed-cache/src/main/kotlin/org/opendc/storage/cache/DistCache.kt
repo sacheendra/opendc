@@ -51,7 +51,7 @@ class DistCache : CliktCommand() {
     val watermarks: Pair<Double, Double> by option().double().pair().default(Pair(0.6, 0.9))
     val manualscalerEnabled: Boolean by option().flag(default=false)
     val manualOptions: Triple<Long, Long, Long> by option().long().triple().default(Triple(4000000, 11, 22))
-    val initHosts: Int by option().int().default(11)
+    val initHosts: Int by option().int().default(20)
     // Work stealing options
     val workstealEnabled: Boolean by option().flag(default=false)
     // Minimize movement for centralized algos
@@ -70,9 +70,6 @@ class DistCache : CliktCommand() {
         val runtime = Runtime.getRuntime()
         var usedMemory = 0.0
         runSimulation {
-
-            // Setup remote storage
-            val remoteStorage = RemoteStorage()
 
             val outputFolderPath = Paths.get(outputFolder)
             Files.createDirectories(outputFolderPath)
@@ -93,6 +90,12 @@ class DistCache : CliktCommand() {
             } else {
                 initHosts
             }
+
+            // Setup remote storage
+            // a storage cluster bandwidth smaller 10x less than the intra-cluster bandwith is common
+            // Found in frontier, find other citations
+            val remoteStorage = RemoteStorage(numHosts*concurrentTasks/10)
+
             // Setup scheduler
             val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10, timeSource)
             val scheduler = TaskScheduler(objectPlacer)

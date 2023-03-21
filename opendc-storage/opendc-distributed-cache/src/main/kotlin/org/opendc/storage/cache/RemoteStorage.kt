@@ -1,10 +1,14 @@
 package org.opendc.storage.cache
 
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Semaphore
 import org.apache.commons.math3.random.*
 
-class RemoteStorage {
+class RemoteStorage(
+    var concurrentTasks: Int = 8
+) {
 
+    var freeProcessingSlots = Semaphore(concurrentTasks)
     val dist: EmpiricalDistribution = EmpiricalDistribution(7)
 
     init {
@@ -23,7 +27,16 @@ class RemoteStorage {
         dist.load(rawSamples)
     }
 
-    fun retrieve(): Long {
-        return dist.sample().toLong()
+    suspend fun retrieve(): Long {
+//        return dist.sample().toLong()
+        freeProcessingSlots.acquire()
+        freeProcessingSlots.release()
+        return 0
+    }
+
+    fun updateConcurrentSlots(newConcurrency: Int) {
+        val oldConcurrency = concurrentTasks
+        concurrentTasks = newConcurrency
+        freeProcessingSlots = Semaphore(newConcurrency, oldConcurrency - freeProcessingSlots.availablePermits)
     }
 }
