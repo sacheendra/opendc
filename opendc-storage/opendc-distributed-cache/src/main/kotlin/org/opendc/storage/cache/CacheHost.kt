@@ -59,11 +59,12 @@ class CacheHost(
         var storageDelay = 0L
         val objInCache = cache[task.objectId]
         if (objInCache == null) {
-            storageDelay = remoteStorage.retrieve()
+            storageDelay = remoteStorage.retrieve(task.duration)
             cache[task.objectId] = true
             task.isHit = false
+        } else {
+            delay(task.duration)
         }
-        delay(task.duration + storageDelay)
         task.endTime = clock.millis()
         task.storageDelay = storageDelay
 

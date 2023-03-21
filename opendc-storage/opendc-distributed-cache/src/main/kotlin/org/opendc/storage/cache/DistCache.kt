@@ -94,7 +94,7 @@ class DistCache : CliktCommand() {
             // Setup remote storage
             // a storage cluster bandwidth smaller 10x less than the intra-cluster bandwith is common
             // Found in frontier, find other citations
-            val remoteStorage = RemoteStorage(numHosts*concurrentTasks/10)
+            val remoteStorage = RemoteStorage(numHosts*concurrentTasks/3)
 
             // Setup scheduler
             val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10, timeSource)
