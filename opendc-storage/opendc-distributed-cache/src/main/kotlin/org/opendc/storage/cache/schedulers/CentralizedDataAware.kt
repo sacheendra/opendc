@@ -186,13 +186,15 @@ class CentralizedDataAwarePlacer(
 
     fun getPerNodeScores(): Map<Int?, Int> {
         val frozen = perNodeScore.toMap()
-        perNodeScore.clear()
+//        perNodeScore.clear()
         return frozen
     }
 
     var prevTargetScores: Map<Int, Double>? = null
     fun rebalance(targetScorePerHostInp: Map<Int, Double>?): Int {
         var movedCount = 0
+
+        perKeyScore
 
         val totalKeyScore = perKeyScore.values.sum().toDouble()
         val normalizedPerKeyScore = perKeyScore.mapValues {
@@ -209,7 +211,7 @@ class CentralizedDataAwarePlacer(
             prevTargetScores as Map<Int, Double>
         } else {
             val avgScorePerHost = 1.0 / scheduler.hosts.size
-            scheduler.hosts.map { it.hostId }.associateWith { avgScorePerHost }
+            scheduler.hosts.map { it.hostId }.associateWith { 1.4 * avgScorePerHost }
         }
 
         // Groupby preserves order according to the docs

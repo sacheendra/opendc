@@ -45,7 +45,7 @@ class DelegatedDataAwarePlacer(
         for (placer in subPlacers) {
             placer.addHosts(hosts)
         }
-        rebalance()
+//        rebalance()
     }
 
     override fun removeHosts(hosts: List<CacheHost>) {
@@ -53,7 +53,7 @@ class DelegatedDataAwarePlacer(
         for (placer in subPlacers) {
             placer.removeHosts(hosts)
         }
-        rebalance()
+//        rebalance()
     }
 
     override fun registerScheduler(scheduler: TaskScheduler) {
@@ -135,8 +135,8 @@ class DelegatedDataAwarePlacer(
     }
 
     override suspend fun offerTask(task: CacheTask) {
-        val placerIdx = (task.objectId % numPlacers).toInt()
-        val placer = subPlacers[placerIdx]
+//        val placerIdx = (task.objectId % numPlacers).toInt()
+        val placer = subPlacers.random()//[placerIdx]
         task.callback = {event ->
             // Use event to dynamically modify the size of global queue
             // to account for late binding
@@ -158,15 +158,13 @@ class DelegatedDataAwarePlacer(
         val totalScore = perPlacerNodeScores.sumOf { it.value.values.sum() }.toDouble()
         val scorePerNode = totalScore / scheduler.hosts.size
 
-//        println("placer counts")
-//        println(perPlacerNodeScores)
-
         val nodeToPlacer: MutableMap<Int?, MutableList<PlacerScorePair>> = mutableMapOf()
-        perPlacerNodeScores.forEach { placer ->
-            placer.value.forEach { entry ->
-                val placerList = nodeToPlacer.computeIfAbsent(entry.key) { _ -> mutableListOf() }
+        perPlacerNodeScores.forEach { placerEntry ->
+            placerEntry.value.forEach { nodeEntry ->
+                val placerList = nodeToPlacer.computeIfAbsent(nodeEntry.key) { _ -> mutableListOf() }
+                val perPartScore = nodeEntry.value.toDouble() / choppedParts
                 (0 until choppedParts).forEach { _ ->
-                    placerList.add(PlacerScorePair(placer.index, entry.value.toDouble() / choppedParts))
+                    placerList.add(PlacerScorePair(placerEntry.index, perPartScore))
                 }
             }
         }
@@ -191,7 +189,7 @@ class DelegatedDataAwarePlacer(
             }
 
             var currentScore = 0.0
-            var cutOffIndex = 0
+            var cutOffIndex = -1
             for (it in placerList.withIndex()) {
                 val newScore = currentScore + it.value.score
                 if (newScore > scorePerNode) break
@@ -227,14 +225,13 @@ class DelegatedDataAwarePlacer(
             }
         }
 
+        println(perPlacerNodeScores)
         for (placer in subPlacers.withIndex()) {
             // Need to normalize as each subplacer expects allocations that sum to 1
-            val nodeAllocs = placerToNodeAllocs[placer.index]
-            if (nodeAllocs != null) {
-                val placerScore = nodeAllocs.values.sum()
-                val normalizedAllocs = nodeAllocs.mapValues { it.value / placerScore }
-                movedCount += placer.value.rebalance(normalizedAllocs)
-            }
+            val nodeAllocs = placerToNodeAllocs[placer.index]!!
+            val placerScore = nodeAllocs.values.sum()
+            val normalizedAllocs = nodeAllocs.mapValues { it.value / placerScore }
+            movedCount += placer.value.rebalance(normalizedAllocs)
         }
 
         return movedCount
