@@ -50,7 +50,7 @@ class CentralizedDataAwarePlacer(
     val globalQueue = ChannelQueue(null)
 
     val perNodeScore = mutableMapOf<Int?, Int>()
-    val perKeyScore = mutableMapOf<Long, Int>()
+    val perKeyScore = sortedMapOf<Long, Int>(compareByDescending { it })
 
     var complete = false
     val thisFlow = flow<TimeCountPair> {
@@ -194,13 +194,14 @@ class CentralizedDataAwarePlacer(
     fun rebalance(targetScorePerHostInp: Map<Int, Double>?): Int {
         var movedCount = 0
 
-        perKeyScore
-
-        val totalKeyScore = perKeyScore.values.sum().toDouble()
-        val normalizedPerKeyScore = perKeyScore.mapValues {
-            it.value / totalKeyScore
-        }.toList().map { KeyScorePair(it.first, it.second) }.sortedBy { it.score }
+        val topKeys = perKeyScore.asSequence().take(10000)
         perKeyScore.clear()
+
+        val totalKeyScore = topKeys.sumOf { it.value }.toDouble()
+        val normalizedPerKeyScore = topKeys.map {
+            KeyScorePair(it.key, it.value / totalKeyScore)
+        }.toList()
+
         /*
             Currently moving heaviest objects first, try moving lightest objects first
          */
@@ -211,7 +212,7 @@ class CentralizedDataAwarePlacer(
             prevTargetScores as Map<Int, Double>
         } else {
             val avgScorePerHost = 1.0 / scheduler.hosts.size
-            scheduler.hosts.map { it.hostId }.associateWith { 1.4 * avgScorePerHost }
+            scheduler.hosts.map { it.hostId }.associateWith { 1.2 * avgScorePerHost }
         }
 
         // Groupby preserves order according to the docs
