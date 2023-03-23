@@ -19,9 +19,10 @@ class CentralizedDataAwarePlacer(
     val clock: InstantSource,
     val minMovement: Boolean = true,
     val stealWork: Boolean = false,
+    val timeRebalance: Boolean = false,
+    val workstealRebalance: Boolean = false,
     val moveSmallestFirst: Boolean = false,
-    val moveOnSteal: Boolean = false,
-    val lookBackward: Boolean = false // to implement
+//    val lookBackward: Boolean = false // to implement
 ): ObjectPlacer {
 
     override lateinit var scheduler: TaskScheduler
@@ -30,7 +31,8 @@ class CentralizedDataAwarePlacer(
     val nodeToKeysMap = mutableMapOf<CacheHost, MutableSet<Long>>()
 
     fun mapKey(key: Long, host: CacheHost) {
-        keyToNodeMap[key] = HostEnTime(host, clock.millis())
+        val currentTime = clock.millis()
+        keyToNodeMap[key] = HostEnTime(host, currentTime, currentTime)
         nodeToKeysMap[host]!!.add(key)
     }
 
@@ -39,7 +41,7 @@ class CentralizedDataAwarePlacer(
         val iter = keyToNodeMap.iterator()
         while(iter.hasNext()) {
             val entry = iter.next()
-            if (entry.value.time < thresholdTime) {
+            if (entry.value.accessTime < thresholdTime) {
                 iter.remove()
                 nodeToKeysMap[entry.value.host]!!.remove(entry.key)
             }
@@ -142,7 +144,7 @@ class CentralizedDataAwarePlacer(
             globalTask!!.hostId = host.hostId
             if (globalTask!!.objectId in keyToNodeMap) {
                 globalTask!!.stolen = true
-                if (moveOnSteal) {
+                if (workstealRebalance) {
                     mapKey(globalTask!!.objectId, host)
                 }
             } else {
@@ -160,8 +162,10 @@ class CentralizedDataAwarePlacer(
         perKeyScore.merge(task.objectId, 1, Int::plus)
         val keyEntry = keyToNodeMap[task.objectId]
         if (keyEntry != null) {
+            val currentTime = clock.millis()
+
             // Reset every five minutes to support location reset when not rebalancing
-            if (clock.millis() - keyEntry.time > 5.minutes.inWholeMilliseconds) {
+            if (timeRebalance && (clock.millis() - keyEntry.insertTime > period.inWholeMilliseconds)) {
                 keyToNodeMap.remove(task.objectId)
                 nodeToKeysMap[keyEntry.host]!!.remove(task.objectId)
 
@@ -170,6 +174,7 @@ class CentralizedDataAwarePlacer(
                 return
             }
 
+            keyEntry.accessTime = currentTime
             val chosenHostId = keyEntry.host.hostId
             val queue = scheduler.hostQueues[chosenHostId]!!
 
@@ -186,7 +191,7 @@ class CentralizedDataAwarePlacer(
 
     fun getPerNodeScores(): Map<Int?, Int> {
         val frozen = perNodeScore.toMap()
-//        perNodeScore.clear()
+        perNodeScore.clear()
         return frozen
     }
 
@@ -212,7 +217,7 @@ class CentralizedDataAwarePlacer(
             prevTargetScores as Map<Int, Double>
         } else {
             val avgScorePerHost = 1.0 / scheduler.hosts.size
-            scheduler.hosts.map { it.hostId }.associateWith { 1.2 * avgScorePerHost }
+            scheduler.hosts.map { it.hostId }.associateWith { 1.3 * avgScorePerHost }
         }
 
         // Groupby preserves order according to the docs
@@ -231,9 +236,9 @@ class CentralizedDataAwarePlacer(
                 // First values are retained, later values moves
                 // Hence, largest value first to move small values
                 val keyList = if (moveSmallestFirst) {
-                    entry.value.reversed()
-                } else {
                     entry.value
+                } else {
+                    entry.value.reversed()
                 }
 
                 val targetScore = targetScorePerHost.getOrDefault(entry.key.hostId, 0.0)
@@ -283,5 +288,6 @@ typealias KeyList = List<KeyScorePair>
 
 data class HostEnTime(
     val host: CacheHost,
-    val time: Long
+    val insertTime: Long,
+    var accessTime: Long
 )

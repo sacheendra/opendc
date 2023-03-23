@@ -56,9 +56,9 @@ class DistCache : CliktCommand() {
     val workstealEnabled: Boolean by option().flag(default=false)
     // Minimize movement for centralized algos
     val minMovement: Boolean by option().flag(default=true)
-    val rebalanceEnabled: Boolean by option().flag(default=false)
-    val rebalanceInterval: Int by option().int().default(1)
-    val rebalanceIntervalDelegation: Int by option().int().default(10)
+    val rebalanceType: String? by option()
+    val rebalanceInterval: Int by option().int().default(300)
+//    val rebalanceIntervalDelegation: Int by option().int().default(10)
     val concurrentTasks: Int by option().int().default(4)
     // Indirection based load balancing options
     // Indirection based autoscaling options
@@ -176,7 +176,7 @@ class DistCache : CliktCommand() {
                 metricRecorder.metricsFlow)
 
             val placerFlow = objectPlacer.getPlacerFlow()
-            if (rebalanceEnabled && placerFlow != null) {
+            if (rebalanceType == "periodic" && placerFlow != null) {
                 val rebalanceWriter = LocalParquetWriter.builder(outputFolderPath.resolve("moves.parquet"), TimeCountWriteSupport())
                     .withCompressionCodec(CompressionCodecName.SNAPPY)
                     .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
@@ -208,15 +208,21 @@ class DistCache : CliktCommand() {
     }
 
     fun mapPlacementAlgoName(name: String, size: Int, timeSource: InstantSource): ObjectPlacer {
+        val timeRebalance = rebalanceType=="time"
+        val workstealRebalance = rebalanceType=="worksteal"
+        if (workstealRebalance && !workstealEnabled) {
+            throw IllegalArgumentException("Worksteal rebalancing enabled, but workstealing is not enabled")
+        }
+
         if (name == "greedy") {
             return GreedyObjectPlacer()
         } else if (name == "random") {
             return RandomObjectPlacer()
         } else if (name == "centralized") {
-            return CentralizedDataAwarePlacer(rebalanceInterval.seconds, timeSource, minMovement, workstealEnabled)
+            return CentralizedDataAwarePlacer(rebalanceInterval.seconds, timeSource, minMovement, workstealEnabled, timeRebalance, workstealRebalance)
         } else if (name == "delegated") {
-            val subPlacers = List(5) { _ -> CentralizedDataAwarePlacer(rebalanceInterval.seconds, timeSource, minMovement, workstealEnabled) }
-            return DelegatedDataAwarePlacer(rebalanceIntervalDelegation.seconds, timeSource, subPlacers)
+            val subPlacers = List(5) { _ -> CentralizedDataAwarePlacer(rebalanceInterval.seconds, timeSource, minMovement, workstealEnabled, workstealRebalance, timeRebalance) }
+            return DelegatedDataAwarePlacer(rebalanceInterval.seconds, timeSource, subPlacers, workstealRebalance)
         }
 
         // Beamer is missing
