@@ -5,11 +5,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Semaphore
 import org.apache.commons.math3.random.*
 
-class RemoteStorage(
-    var concurrentTasks: Int = 8
-) {
+class RemoteStorage {
 
-    var freeProcessingSlots = Semaphore(concurrentTasks)
     val dist: EmpiricalDistribution = EmpiricalDistribution(7)
 
     init {
@@ -37,14 +34,9 @@ class RemoteStorage(
         // If task needs 100mbps
         // Remote only offers 80mbps
         // Additional delay = ((100-80)/80) * duration
-        val storageDelay = (duration/4.0 + dist.sample()).toLong()
+//        val storageDelay = (duration/4.0 + dist.sample()).toLong()
 
+        val storageDelay = dist.sample().toLong()
         return storageDelay
-    }
-
-    fun updateConcurrentSlots(newConcurrency: Int) {
-        val oldConcurrency = concurrentTasks
-        concurrentTasks = newConcurrency
-        freeProcessingSlots = Semaphore(newConcurrency, oldConcurrency - freeProcessingSlots.availablePermits)
     }
 }

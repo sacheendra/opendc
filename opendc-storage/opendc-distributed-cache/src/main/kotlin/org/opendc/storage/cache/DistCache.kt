@@ -60,6 +60,7 @@ class DistCache : CliktCommand() {
     val rebalanceInterval: Int by option().int().default(300)
 //    val rebalanceIntervalDelegation: Int by option().int().default(10)
     val concurrentTasks: Int by option().int().default(4)
+    val cacheSlots: Int by option().int().default(1000)
     // Indirection based load balancing options
     // Indirection based autoscaling options
     // Prefetching options
@@ -94,7 +95,7 @@ class DistCache : CliktCommand() {
             // Setup remote storage
             // a storage cluster bandwidth smaller 10x less than the intra-cluster bandwith is common
             // Found in frontier, find other citations
-            val remoteStorage = RemoteStorage(numHosts*concurrentTasks/3)
+            val remoteStorage = RemoteStorage()
 
             // Setup scheduler
             val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10, timeSource)
@@ -103,13 +104,13 @@ class DistCache : CliktCommand() {
             // Setup hosts
             val addHostsFlow = flow {
                 scheduler.addHosts((1..numHosts)
-                    .map { CacheHost(concurrentTasks, 1000, timeSource, remoteStorage, scheduler, metricRecorder) })
+                    .map { CacheHost(concurrentTasks, cacheSlots, timeSource, remoteStorage, scheduler, metricRecorder) })
                 emit(Unit)
             }
 
             // Setup autoscaler
             val autoscaler = Autoscaler(timeSource, remoteStorage, scheduler, metricRecorder, watermarks)
-            val manualScaler = ManualScaler(manualOptions.first + warmupDelay, manualOptions.third, concurrentTasks, scheduler, timeSource, remoteStorage, metricRecorder)
+            val manualScaler = ManualScaler(manualOptions.first + warmupDelay, manualOptions.third, concurrentTasks, cacheSlots, scheduler, timeSource, remoteStorage, metricRecorder)
 
             // Write results for completed tasks
             val writeTaskFlow = scheduler.completedTaskFlow
@@ -162,7 +163,7 @@ class DistCache : CliktCommand() {
                     }
                 }
                 .onCompletion {
-                    delay(lastTask!!.submitTime - currentTime + 999 + warmupDelay)
+                    delay(lastTask!!.submitTime - currentTime + 9999 + warmupDelay)
 
                     // Need to stop timed events like autoscaling before the scheduler
                     metricRecorder.complete()

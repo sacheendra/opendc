@@ -9,6 +9,7 @@ class ManualScaler(
     val triggertime: Long,
     val numHosts: Long,
     val concurrentTasks: Int,
+    val cacheSlots: Int,
     val scheduler: TaskScheduler,
     val clock: InstantSource,
     val remoteStorage: RemoteStorage,
@@ -20,7 +21,7 @@ class ManualScaler(
 
         if (serverChange > 0) {
             scheduler.addHosts((1..serverChange)
-                .map { CacheHost(concurrentTasks, 1000, clock, remoteStorage, scheduler, metricRecorder) })
+                .map { CacheHost(concurrentTasks, cacheSlots, clock, remoteStorage, scheduler, metricRecorder) })
         } else if (serverChange < 0) {
             if (scheduler.hosts.size == 1) {
                 return@flow
