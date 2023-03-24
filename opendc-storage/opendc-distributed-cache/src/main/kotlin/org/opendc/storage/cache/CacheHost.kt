@@ -62,9 +62,8 @@ class CacheHost(
             storageDelay = remoteStorage.retrieve(task.duration)
             cache[task.objectId] = true
             task.isHit = false
-        } else {
-            delay(task.duration)
         }
+        delay(storageDelay + task.duration)
         task.endTime = clock.millis()
         task.storageDelay = storageDelay
 

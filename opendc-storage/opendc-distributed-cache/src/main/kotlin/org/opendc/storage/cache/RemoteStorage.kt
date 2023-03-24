@@ -34,16 +34,10 @@ class RemoteStorage(
     }
 
     suspend fun retrieve(duration: Long): Long {
-//        return dist.sample().toLong()
-//        val storageDelay = if (duration < 300) {
-//            100*duration / 60
-//        } else {
-//            100*duration / 80
-//        } + dist.sample().toLong()
-        val storageDelay = (100*duration / 80) + dist.sample().toLong()
-        coroutineScope {
-            delay(storageDelay)
-        }
+        // If task needs 100mbps
+        // Remote only offers 80mbps
+        // Additional delay = ((100-80)/80) * duration
+        val storageDelay = (duration/4.0 + dist.sample()).toLong()
 
         return storageDelay
     }
