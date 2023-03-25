@@ -12,9 +12,9 @@ class RemoteStorage {
     init {
         val rawSamples = (
             DoubleArray(10) {3556.0}
-                + DoubleArray(10) {2884.0}
-                + DoubleArray(100) {2280.0}
-                + DoubleArray(1000) {1256.0}
+                + DoubleArray(100) {2884.0}
+                + DoubleArray(1000) {2280.0}
+                + DoubleArray(4000) {1256.0}
                 + DoubleArray(5000) {45.0}
                 + DoubleArray(40000) {21.0}
                 + DoubleArray(50000) {13.0}
