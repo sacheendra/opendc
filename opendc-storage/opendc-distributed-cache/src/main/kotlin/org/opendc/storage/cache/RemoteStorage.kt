@@ -5,7 +5,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Semaphore
 import org.apache.commons.math3.random.*
 
-class RemoteStorage {
+class RemoteStorage(
+    val bandwidthPenalty: Boolean = false
+) {
 
     val dist: EmpiricalDistribution = EmpiricalDistribution(7)
 
@@ -34,9 +36,12 @@ class RemoteStorage {
         // If task needs 100mbps
         // Remote only offers 80mbps
         // Additional delay = ((100-80)/80) * duration
-//        val storageDelay = (duration/4.0 + dist.sample()).toLong()
+        val storageDelay = if (bandwidthPenalty) {
+            (duration/4.0 + dist.sample()).toLong()
+        } else {
+            dist.sample().toLong()
+        }
 
-        val storageDelay = dist.sample().toLong()
         return storageDelay
     }
 }

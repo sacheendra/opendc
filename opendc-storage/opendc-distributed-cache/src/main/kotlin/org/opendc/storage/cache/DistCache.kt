@@ -61,6 +61,7 @@ class DistCache : CliktCommand() {
     val rebalanceInterval: Int by option().int().default(300)
 //    val rebalanceIntervalDelegation: Int by option().int().default(10)
     val concurrentTasks: Int by option().int().default(4)
+    val bandwidthPenalty: Boolean by option().flag(default=false)
     val cacheSlots: Int by option().int().default(1000)
     val randomSeed: Int by option().int().default(42)
     // Indirection based load balancing options
@@ -99,7 +100,7 @@ class DistCache : CliktCommand() {
             // Setup remote storage
             // a storage cluster bandwidth smaller 10x less than the intra-cluster bandwith is common
             // Found in frontier, find other citations
-            val remoteStorage = RemoteStorage()
+            val remoteStorage = RemoteStorage(bandwidthPenalty)
 
             // Setup scheduler
             val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10, timeSource, rng)
