@@ -5,10 +5,12 @@ import kotlinx.coroutines.flow.Flow
 import org.opendc.storage.cache.CacheHost
 import org.opendc.storage.cache.CacheTask
 import org.opendc.storage.cache.TaskScheduler
+import kotlin.random.Random
 
 class ConsistentHashWrapper(
     val chash: ConsistentHash,
-    val stealWork: Boolean = false
+    val stealWork: Boolean = false,
+    val rng: Random
 ): ObjectPlacer {
 
     override lateinit var scheduler: TaskScheduler
@@ -38,7 +40,7 @@ class ConsistentHashWrapper(
         if (task == null) {
             if (stealWork) {
                 // Work steal
-                val chosenQueue = scheduler.hostQueues.values.shuffled().take(2)
+                val chosenQueue = scheduler.hostQueues.values.shuffled(rng).take(2)
                     .maxBy { it.q.size }
                 if (chosenQueue.q.size > 0) {
                     val globalTask = chosenQueue.next()!!

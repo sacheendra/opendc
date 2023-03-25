@@ -12,6 +12,7 @@ import org.opendc.storage.cache.TaskScheduler
 import java.time.InstantSource
 import java.util.PriorityQueue
 import kotlin.math.roundToInt
+import kotlin.random.Random
 import kotlin.time.Duration
 
 class DelegatedDataAwarePlacer(
@@ -20,6 +21,7 @@ class DelegatedDataAwarePlacer(
     val subPlacers: List<CentralizedDataAwarePlacer>,
     val workstealRebalance: Boolean = false,
     val moveSmallestFirst: Boolean = false,
+    val rng: Random,
     val lookBackward: Boolean = false, // to implement
     val minimizeSpread: Boolean = false, // to implement
 ): ObjectPlacer {
@@ -89,7 +91,7 @@ class DelegatedDataAwarePlacer(
 
         var busiestPlacer: CentralizedDataAwarePlacer? = null
         if (task == null) {
-            busiestPlacer = subPlacers.shuffled().take(2).maxBy { it.globalQueueSize() }
+            busiestPlacer = subPlacers.shuffled(rng).take(2).maxBy { it.globalQueueSize() }
             task = busiestPlacer.globalQueue.next()
             // Late binding check
             while (task != null && task.hostId >= 0) {

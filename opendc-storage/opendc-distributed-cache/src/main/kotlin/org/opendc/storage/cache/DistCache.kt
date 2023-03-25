@@ -37,6 +37,7 @@ import java.nio.file.Files
 import java.nio.file.Paths
 import java.time.InstantSource
 import kotlin.IllegalArgumentException
+import kotlin.random.Random
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -61,6 +62,7 @@ class DistCache : CliktCommand() {
 //    val rebalanceIntervalDelegation: Int by option().int().default(10)
     val concurrentTasks: Int by option().int().default(4)
     val cacheSlots: Int by option().int().default(1000)
+    val randomSeed: Int by option().int().default(42)
     // Indirection based load balancing options
     // Indirection based autoscaling options
     // Prefetching options
@@ -74,6 +76,8 @@ class DistCache : CliktCommand() {
 
             val outputFolderPath = Paths.get(outputFolder)
             Files.createDirectories(outputFolderPath)
+
+            val rng = Random(randomSeed)
 
             // Setup metrics recorder
             val resultWriter = LocalParquetWriter.builder(outputFolderPath.resolve("tasks.parquet"), CacheTaskWriteSupport())
@@ -98,7 +102,7 @@ class DistCache : CliktCommand() {
             val remoteStorage = RemoteStorage()
 
             // Setup scheduler
-            val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10, timeSource)
+            val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10, timeSource, rng)
             val scheduler = TaskScheduler(objectPlacer)
 
             // Setup hosts
@@ -208,7 +212,7 @@ class DistCache : CliktCommand() {
         println("OK!")
     }
 
-    fun mapPlacementAlgoName(name: String, size: Int, timeSource: InstantSource): ObjectPlacer {
+    fun mapPlacementAlgoName(name: String, size: Int, timeSource: InstantSource, rng: Random): ObjectPlacer {
         val timeRebalance = rebalanceType=="time"
         val workstealRebalance = rebalanceType=="worksteal"
         if (workstealRebalance && !workstealEnabled) {
@@ -223,7 +227,7 @@ class DistCache : CliktCommand() {
             return CentralizedDataAwarePlacer(rebalanceInterval.seconds, timeSource, minMovement, workstealEnabled, timeRebalance, workstealRebalance)
         } else if (name == "delegated") {
             val subPlacers = List(5) { _ -> CentralizedDataAwarePlacer(rebalanceInterval.seconds, timeSource, minMovement, workstealEnabled, workstealRebalance, timeRebalance) }
-            return DelegatedDataAwarePlacer(rebalanceInterval.seconds, timeSource, subPlacers, workstealRebalance)
+            return DelegatedDataAwarePlacer(rebalanceInterval.seconds, timeSource, subPlacers, workstealRebalance, rng=rng)
         }
 
         // Beamer is missing
@@ -242,6 +246,6 @@ class DistCache : CliktCommand() {
             }
         }
 
-        return ConsistentHashWrapper(ConsistentHash.create(algo, ConsistentHash.DEFAULT_HASH_ALGOTITHM, size), workstealEnabled)
+        return ConsistentHashWrapper(ConsistentHash.create(algo, ConsistentHash.DEFAULT_HASH_ALGOTITHM, size), workstealEnabled, rng)
     }
 }
