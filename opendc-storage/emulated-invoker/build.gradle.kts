@@ -5,7 +5,7 @@ plugins {
 
 dependencies {
     implementation(libs.clikt)
-    implementation(projects.opendcStorage.opendcDistributedCache)
+    api(projects.opendcStorage.opendcDistributedCache)
 
     implementation(libs.commons.collections4)
 

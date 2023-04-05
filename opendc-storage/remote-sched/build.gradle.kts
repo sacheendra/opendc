@@ -16,8 +16,8 @@ plugins {
 
 dependencies {
     implementation(libs.clikt)
-    implementation(projects.opendcStorage.opendcDistributedCache)
-    implementation(projects.opendcTrace.opendcTraceParquet)
+    api(projects.opendcStorage.opendcDistributedCache)
+    api(projects.opendcTrace.opendcTraceParquet)
 
     implementation(files("../libs/netpar-1.0.0-jar-with-dependencies.jar"))
 
