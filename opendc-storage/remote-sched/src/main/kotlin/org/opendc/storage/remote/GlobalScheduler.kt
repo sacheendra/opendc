@@ -16,7 +16,7 @@ object GlobalScheduler {
 
     fun initialize(scheduler: TaskScheduler) {
         sched = scheduler
-        remoteStorage = RemoteStorage(1)
+        remoteStorage = RemoteStorage(true)
 
     }
 
