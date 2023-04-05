@@ -24,6 +24,7 @@ import java.nio.file.Files
 import java.nio.file.Paths
 import java.time.Clock
 import java.time.InstantSource
+import kotlin.random.Random
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -39,16 +40,9 @@ class RemoteSched : CliktCommand() {
     // Work stealing options
     val workstealEnabled: Boolean by option().flag(default=false)
 
+    val rng = Random(42)
+
     override fun run() {
-
-//        val outputFolderPath = Paths.get(outputFolder)
-//        Files.createDirectories(outputFolderPath)
-
-        // Setup metrics recorder
-//        val resultWriter = LocalParquetWriter.builder(outputFolderPath.resolve("tasks.parquet"), CacheTaskWriteSupport())
-//            .withCompressionCodec(CompressionCodecName.SNAPPY)
-//            .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
-//            .build()
 
         // Setup scheduler
         val objectPlacer = mapPlacementAlgoName(placementAlgo, Clock.systemUTC())
@@ -69,7 +63,7 @@ class RemoteSched : CliktCommand() {
             return CentralizedDataAwarePlacer(0.seconds, timeSource, false, workstealEnabled, false, false)
         } else if (name == "delegated") {
             val subPlacers = List(5) { _ -> CentralizedDataAwarePlacer(0.seconds, timeSource, false, workstealEnabled, false, false) }
-            return DelegatedDataAwarePlacer(0.seconds, timeSource, subPlacers, false)
+            return DelegatedDataAwarePlacer(0.seconds, timeSource, subPlacers, false, rng=rng)
         }
 
         // Beamer is missing
@@ -88,6 +82,6 @@ class RemoteSched : CliktCommand() {
             }
         }
 
-        return ConsistentHashWrapper(ConsistentHash.create(algo, ConsistentHash.DEFAULT_HASH_ALGOTITHM, 400), workstealEnabled)
+        return ConsistentHashWrapper(ConsistentHash.create(algo, ConsistentHash.DEFAULT_HASH_ALGOTITHM, 400), workstealEnabled, rng=rng)
     }
 }
