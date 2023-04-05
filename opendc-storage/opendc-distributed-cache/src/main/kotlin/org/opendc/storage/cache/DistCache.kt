@@ -109,7 +109,7 @@ class DistCache : CliktCommand() {
             // Setup hosts
             val addHostsFlow = flow {
                 scheduler.addHosts((1..numHosts)
-                    .map { CacheHost(concurrentTasks, cacheSlots, timeSource, remoteStorage, scheduler, metricRecorder) })
+                    .map { CacheHost(concurrentTasks, cacheSlots, timeSource, remoteStorage, scheduler) })
                 emit(Unit)
             }
 
@@ -146,7 +146,7 @@ class DistCache : CliktCommand() {
                 .onEach {
                     launch {
                         delay(it.submitTime - currentTime)
-                        metricRecorder.recordSubmission(it)
+//                        metricRecorder.recordSubmission(it)
                         scheduler.offerTask(it)
                     }
                 }.drop(8000*120)
@@ -163,7 +163,7 @@ class DistCache : CliktCommand() {
                     lastTask = it
                     launch {
                         delay(it.submitTime - currentTime + warmupDelay)
-                        metricRecorder.recordSubmission(it)
+//                        metricRecorder.recordSubmission(it)
                         scheduler.offerTask(it)
                     }
                 }

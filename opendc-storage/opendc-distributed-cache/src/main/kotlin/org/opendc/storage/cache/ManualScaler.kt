@@ -21,7 +21,7 @@ class ManualScaler(
 
         if (serverChange > 0) {
             scheduler.addHosts((1..serverChange)
-                .map { CacheHost(concurrentTasks, cacheSlots, clock, remoteStorage, scheduler, metricRecorder) })
+                .map { CacheHost(concurrentTasks, cacheSlots, clock, remoteStorage, scheduler) })
         } else if (serverChange < 0) {
             if (scheduler.hosts.size == 1) {
                 return@flow

@@ -15,8 +15,7 @@ class CacheHost(
     val numCacheSlots: Int = 1000,
     val clock: InstantSource,
     val remoteStorage: RemoteStorage,
-    val scheduler: TaskScheduler,
-    val metricRecorder: MetricRecorder
+    val scheduler: TaskScheduler
 ) : Node {
 
     companion object {
@@ -26,7 +25,7 @@ class CacheHost(
             }
     }
 
-    val hostId = nextHostId
+    var hostId = nextHostId
 
     val cache: MutableMap<Long, Boolean> = if (numCacheSlots > 0) {
         LRUMap<Long, Boolean>(numCacheSlots, numCacheSlots)
@@ -53,8 +52,6 @@ class CacheHost(
     }
 
     suspend fun runTask(task: CacheTask) = coroutineScope {
-        metricRecorder.recordStart(task)
-
         task.startTime = clock.millis()
         var storageDelay = 0L
         val objInCache = cache[task.objectId]
@@ -66,8 +63,6 @@ class CacheHost(
         delay(storageDelay + task.duration)
         task.endTime = clock.millis()
         task.storageDelay = storageDelay
-
-        metricRecorder.recordCompletion(task)
     }
 
     override fun name(): String {

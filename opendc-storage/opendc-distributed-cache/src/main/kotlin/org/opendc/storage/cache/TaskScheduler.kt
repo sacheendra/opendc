@@ -14,7 +14,8 @@ import org.opendc.storage.cache.schedulers.ObjectPlacer
 import java.util.PriorityQueue
 
 class TaskScheduler(
-    val nodeSelector: ObjectPlacer
+    val nodeSelector: ObjectPlacer,
+    val isSim: Boolean = true
 ) {
     val hosts = ArrayList<CacheHost>()
     val hostQueues = HashMap<Int, ChannelQueue>()
@@ -46,8 +47,10 @@ class TaskScheduler(
         }
         // Start listening on queue after creating all queues
         // Otherwise, items may be sent to queues which are not being read
-        for (host in toAdd) {
-            newHostsChannel.send(host)
+        if (isSim) {
+            for (host in toAdd) {
+                newHostsChannel.send(host)
+            }
         }
     }
 

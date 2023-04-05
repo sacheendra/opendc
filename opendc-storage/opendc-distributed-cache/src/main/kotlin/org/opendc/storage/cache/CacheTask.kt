@@ -29,6 +29,7 @@ data class CacheTask(
     var hostId: Int = -1,
     var storageDelay: Long = -1,
     var callback: ((event: TaskEvent) -> Unit)? = null,
+    var metadata: String? = null,
 )
 
 enum class TaskEvent {

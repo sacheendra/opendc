@@ -48,7 +48,7 @@ class Autoscaler(val clock: InstantSource,
     suspend fun changeNumServers(serverChange: Int) {
         if (serverChange > 0) {
             scheduler.addHosts((1..serverChange)
-                .map { CacheHost(4, 100, clock, remoteStorage, scheduler, metricRecorder) })
+                .map { CacheHost(4, 100, clock, remoteStorage, scheduler) })
         } else if (serverChange < 0) {
             if (scheduler.hosts.size == 1) {
                 return
