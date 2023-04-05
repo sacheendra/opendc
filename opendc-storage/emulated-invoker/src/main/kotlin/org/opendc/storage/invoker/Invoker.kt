@@ -15,9 +15,9 @@ import kotlinx.coroutines.sync.Semaphore
 import org.apache.commons.collections4.map.LRUMap
 import org.opendc.storage.cache.RemoteStorage
 
-fun main(args: Array<String>) = RemoteSched().main(args)
+fun main(args: Array<String>) = Invoker().main(args)
 
-class RemoteSched : CliktCommand() {
+class Invoker : CliktCommand() {
     val invokerId: Int by argument(help="Invoker ID").int()
     val concurrency: Int by argument(help="Concurrency").int()
     val schedulerURL: String by argument(help="Scheduler URL")
