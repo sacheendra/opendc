@@ -21,7 +21,7 @@ data class CacheTask(
     val taskId: Long,
     val objectId: Long,
     val duration: Long,
-    val submitTime: Long,
+    var submitTime: Long,
     var stolen: Boolean = false,
     var startTime: Long = -1,
     var endTime: Long = -1,

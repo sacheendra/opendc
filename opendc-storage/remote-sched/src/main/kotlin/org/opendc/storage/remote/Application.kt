@@ -49,7 +49,7 @@ class RemoteSched : CliktCommand() {
         val scheduler = TaskScheduler(objectPlacer, false)
         GlobalScheduler.initialize(scheduler)
 
-        embeddedServer(Netty, port = 9898, host = "0.0.0.0", module = Application::module)
+        embeddedServer(Netty, port = 19001, host = "0.0.0.0", module = Application::module)
             .start(wait = true)
 
     }

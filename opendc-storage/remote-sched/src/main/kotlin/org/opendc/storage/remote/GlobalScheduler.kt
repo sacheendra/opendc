@@ -29,8 +29,8 @@ object GlobalScheduler {
         return "DONE"
     }
 
-    suspend fun offerTask(taskId: String, objectId: String, duration: Long, metadata:String) {
-        sched.offerTask(CacheTask(taskId.toLong(), objectId.toLong(), duration, clock.millis(), metadata=metadata))
+    suspend fun offerTask(taskId: String, objectId: String, duration: Long, submitTime: Long, metadata:String) {
+        sched.offerTask(CacheTask(taskId.toLong(), objectId.toLong(), duration, submitTime, metadata=metadata))
     }
 
     suspend fun nextTask(hostId: String): String {
@@ -38,6 +38,6 @@ object GlobalScheduler {
         if (task == null) {
             return ""
         }
-        return "${task.taskId},${task.objectId},${task.duration},${task.metadata}"
+        return "${task.taskId},${task.objectId},${task.duration},${task.submitTime},${task.metadata}"
     }
 }

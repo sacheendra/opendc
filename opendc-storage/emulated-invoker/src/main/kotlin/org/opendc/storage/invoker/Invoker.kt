@@ -5,6 +5,7 @@ import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.types.int
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
 import io.ktor.client.request.post
@@ -14,7 +15,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import org.apache.commons.collections4.map.LRUMap
+import org.apache.parquet.hadoop.ParquetFileWriter
+import org.apache.parquet.hadoop.metadata.CompressionCodecName
+import org.opendc.storage.cache.CacheTask
+import org.opendc.storage.cache.CacheTaskWriteSupport
 import org.opendc.storage.cache.RemoteStorage
+import org.opendc.trace.util.parquet.LocalParquetWriter
+import java.nio.file.Files
+import java.nio.file.Paths
+import java.time.Clock
 
 fun main(args: Array<String>) = Invoker().main(args)
 
@@ -22,10 +31,20 @@ class Invoker : CliktCommand() {
     val invokerIdStr: String by argument(help="Invoker ID")
     val concurrencyStr: String by argument(help="Concurrency")
     val schedulerURL: String by argument(help="Scheduler URL")
+    val outputFolder: String by argument()
 
     override fun run() {
         val invokerId = invokerIdStr.toInt()
         val concurrency = concurrencyStr.toInt()
+
+        val outputFolderPath = Paths.get(outputFolder)
+        Files.createDirectories(outputFolderPath)
+
+        // Setup metrics recorder
+        val resultWriter = LocalParquetWriter.builder(outputFolderPath.resolve("invoker${invokerId}.parquet"), CacheTaskWriteSupport())
+            .withCompressionCodec(CompressionCodecName.SNAPPY)
+            .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+            .build()
 
         val remoteStorage = RemoteStorage()
         val cache: MutableMap<Long, Boolean> = LRUMap<Long, Boolean>(1000, 1000)
@@ -35,7 +54,8 @@ class Invoker : CliktCommand() {
         runBlocking {
             val client = HttpClient(CIO){
                 install(HttpTimeout) {
-                    requestTimeoutMillis = Long.MAX_VALUE
+                    requestTimeoutMillis = HttpTimeout.INFINITE_TIMEOUT_MS
+                    socketTimeoutMillis = HttpTimeout.INFINITE_TIMEOUT_MS
                 }
             }
 
@@ -47,31 +67,46 @@ class Invoker : CliktCommand() {
 //                throw Exception("Unable to register invoker ${invokerId}: $registerBody")
             }
 
-            while (true) {
-                freeProcessingSlots.acquire()
+            try {
+                while (true) {
+                    freeProcessingSlots.acquire()
 
-                val nextRes = client.post(schedulerURL) {
-                    setBody("NEXT,${invokerId}")
+                    val nextRes = client.post(schedulerURL) {
+                        setBody("NEXT,${invokerId}")
+                    }
+                    val nextBody = nextRes.bodyAsText()
+                    if (nextBody == "") continue
+
+                    val splits = nextBody.split(",")
+                    val taskId = splits[0].toLong()
+                    val objectId = splits[1].toLong()
+                    val duration = splits[2].toLong()
+                    val submitTime = splits[3].toLong()
+                    val callbackUrl = splits[4]
+
+                    var storageDelay = 0L
+                    val objInCache = cache[objectId]
+                    if (objInCache == null) {
+                        storageDelay = remoteStorage.retrieve(duration)
+                        cache[objectId] = true
+                    }
+//                delay(10)
+
+                    freeProcessingSlots.release()
+
+                    resultWriter.write(
+                        CacheTask(
+                            taskId,
+                            objectId,
+                            duration,
+                            submitTime,
+                            endTime = Clock.systemUTC().millis()
+                        )
+                    )
                 }
-                val nextBody = nextRes.bodyAsText()
-
-                val splits = nextBody.split(",")
-                val taskId = splits[0].toLong()
-                val objectId = splits[1].toLong()
-                val duration = splits[2].toLong()
-                val callbackUrl = splits[3]
-
-                var storageDelay = 0L
-                val objInCache = cache[objectId]
-                if (objInCache == null) {
-                    storageDelay = remoteStorage.retrieve(duration)
-                    cache[objectId] = true
-                }
-                delay(storageDelay + duration)
-
-                client.get(callbackUrl)
-
-                freeProcessingSlots.release()
+            } catch(e: Exception) {
+                resultWriter.close()
+                throw e
             }
         }
     }

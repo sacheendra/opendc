@@ -7,25 +7,16 @@ plugins {
     id("io.ktor.plugin") version "2.2.4"
 }
 
-//application {
-//    mainClass.set("org.opendc.storage.remote.ApplicationKt")
-//
-//    val isDevelopment: Boolean = project.ext.has("development")
-//    applicationDefaultJvmArgs = listOf("-Dio.ktor.development=$isDevelopment")
-//}
-
 dependencies {
     implementation(libs.clikt)
-    api(projects.opendcStorage.opendcDistributedCache)
-    api(projects.opendcTrace.opendcTraceParquet)
+    implementation(projects.opendcStorage.opendcDistributedCache)
+    implementation(projects.opendcTrace.opendcTraceParquet)
 
     implementation(files("../libs/netpar-1.0.0-jar-with-dependencies.jar"))
 
     implementation("io.ktor:ktor-server-core-jvm:$ktor_version")
     implementation("io.ktor:ktor-server-netty-jvm:$ktor_version")
     implementation("ch.qos.logback:logback-classic:$logback_version")
-    testImplementation("io.ktor:ktor-server-tests-jvm:$ktor_version")
-    testImplementation("org.jetbrains.kotlin:kotlin-test-junit:$kotlin_version")
 }
 
 task("fatJar", type = Jar::class) {
