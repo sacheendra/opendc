@@ -11,9 +11,12 @@ import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.withContext
 import org.apache.commons.collections4.map.LRUMap
 import org.apache.parquet.hadoop.ParquetFileWriter
 import org.apache.parquet.hadoop.metadata.CompressionCodecName
@@ -94,15 +97,17 @@ class Invoker : CliktCommand() {
 
                     freeProcessingSlots.release()
 
-                    resultWriter.write(
-                        CacheTask(
-                            taskId,
-                            objectId,
-                            duration,
-                            submitTime,
-                            endTime = Clock.systemUTC().millis()
+                    withContext(Dispatchers.IO) {
+                        resultWriter.write(
+                            CacheTask(
+                                taskId,
+                                objectId,
+                                duration,
+                                submitTime,
+                                endTime = Clock.systemUTC().millis()
+                            )
                         )
-                    )
+                    }
                 }
             } catch(e: Exception) {
                 resultWriter.close()
