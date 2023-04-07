@@ -14,6 +14,7 @@ import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
@@ -49,6 +50,14 @@ class Invoker : CliktCommand() {
             .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
             .build()
 
+        Runtime.getRuntime().addShutdownHook(object : Thread() {
+            override fun run() = runBlocking {
+                println("Gracefully shutting down")
+                resultWriter.close()
+                println("Gracefully shut!!!")
+            }
+        })
+
         val remoteStorage = RemoteStorage()
         val cache: MutableMap<Long, Boolean> = LRUMap<Long, Boolean>(1000, 1000)
 
@@ -74,11 +83,14 @@ class Invoker : CliktCommand() {
                 while (true) {
                     freeProcessingSlots.acquire()
 
+                    val dummyStart = Clock.systemUTC().millis()
                     val nextRes = client.post(schedulerURL) {
                         setBody("NEXT,${invokerId}")
                     }
                     val nextBody = nextRes.bodyAsText()
                     if (nextBody == "") continue
+
+                    val actualStart = Clock.systemUTC().millis()
 
                     val splits = nextBody.split(",")
                     val taskId = splits[0].toLong()
@@ -89,22 +101,27 @@ class Invoker : CliktCommand() {
 
                     var storageDelay = 0L
                     val objInCache = cache[objectId]
+                    var isHit = true
                     if (objInCache == null) {
+                        isHit = false
                         storageDelay = remoteStorage.retrieve(duration)
                         cache[objectId] = true
                     }
-//                delay(10)
+                    delay(storageDelay+duration)
 
                     freeProcessingSlots.release()
 
-                    withContext(Dispatchers.IO) {
+                    launch(Dispatchers.IO) {
                         resultWriter.write(
                             CacheTask(
                                 taskId,
-                                objectId,
+                                callbackUrl.toLong(),
                                 duration,
                                 submitTime,
-                                endTime = Clock.systemUTC().millis()
+                                isHit = isHit,
+                                startTime = actualStart,
+                                endTime = Clock.systemUTC().millis(),
+                                storageDelay = dummyStart
                             )
                         )
                     }

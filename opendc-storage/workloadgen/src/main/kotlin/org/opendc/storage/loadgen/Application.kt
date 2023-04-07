@@ -2,6 +2,8 @@ package org.opendc.storage.loadgen
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.arguments.argument
+import com.github.ajalt.clikt.parameters.arguments.default
+import com.github.ajalt.clikt.parameters.types.int
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.engine.okhttp.OkHttp
@@ -45,9 +47,9 @@ fun Application.module() {
 }
 
 class LoadGen : CliktCommand() {
-    val outputFolder: String by argument(help="Output result file path")
     val inputFilename: String by argument(help="Input trace")
     val schedulerURL: String by argument(help="Scheduler URL")
+    val sampleIndex: Int by argument().int().default(4)
 
     override fun run() {
 
@@ -75,18 +77,22 @@ class LoadGen : CliktCommand() {
                 return (System.nanoTime() / 1e6.toLong()) - startTime
             }
 
-            var i = 0
+            var i=0
             while (true) {
                 i++
                 val task = traceReader.read()
                 if (task == null) break
-                delay(task.submitTime - currentTime())
-//                TaskTracker.taskStart(task)
-//                TaskTracker.endTask(task)
-                if (i%8 != 0) continue
-                launch {
-                    client.post(schedulerURL) {
-                        setBody("OFFER,${task.taskId},${task.objectId},${task.duration},${Clock.systemUTC().millis()},http://localhost:19002")
+
+                if (i%sampleIndex == 0) {
+                    delay(task.submitTime - currentTime())
+                    launch {
+                        client.post(schedulerURL) {
+                            setBody(
+                                "OFFER,${task.taskId},${task.objectId},${task.duration},${
+                                    Clock.systemUTC().millis()
+                                },http://localhost:19002"
+                            )
+                        }
                     }
                 }
             }

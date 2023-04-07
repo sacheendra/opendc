@@ -30,7 +30,7 @@ object GlobalScheduler {
     }
 
     suspend fun offerTask(taskId: String, objectId: String, duration: Long, submitTime: Long, metadata:String) {
-        sched.offerTask(CacheTask(taskId.toLong(), objectId.toLong(), duration, submitTime, metadata=metadata))
+        sched.offerTask(CacheTask(taskId.toLong(), objectId.toLong(), duration, submitTime, metadata=Clock.systemUTC().millis().toString()))
     }
 
     suspend fun nextTask(hostId: String): String {
