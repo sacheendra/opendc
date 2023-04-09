@@ -83,47 +83,49 @@ class Invoker : CliktCommand() {
                 while (true) {
                     freeProcessingSlots.acquire()
 
-                    val dummyStart = Clock.systemUTC().millis()
-                    val nextRes = client.post(schedulerURL) {
-                        setBody("NEXT,${invokerId}")
-                    }
-                    val nextBody = nextRes.bodyAsText()
-                    if (nextBody == "") continue
+                    launch {
+                        val dummyStart = Clock.systemUTC().millis()
+                        val nextRes = client.post(schedulerURL) {
+                            setBody("NEXT,${invokerId}")
+                        }
+                        val nextBody = nextRes.bodyAsText()
+                        if (nextBody == "") freeProcessingSlots.release()
 
-                    val actualStart = Clock.systemUTC().millis()
+                        val actualStart = Clock.systemUTC().millis()
 
-                    val splits = nextBody.split(",")
-                    val taskId = splits[0].toLong()
-                    val objectId = splits[1].toLong()
-                    val duration = splits[2].toLong()
-                    val submitTime = splits[3].toLong()
-                    val callbackUrl = splits[4]
+                        val splits = nextBody.split(",")
+                        val taskId = splits[0].toLong()
+                        val objectId = splits[1].toLong()
+                        val duration = splits[2].toLong()
+                        val submitTime = splits[3].toLong()
+                        val callbackUrl = splits[4]
 
-                    var storageDelay = 0L
-                    val objInCache = cache[objectId]
-                    var isHit = true
-                    if (objInCache == null) {
-                        isHit = false
-                        storageDelay = remoteStorage.retrieve(duration)
-                        cache[objectId] = true
-                    }
-                    delay(storageDelay+duration)
+                        var storageDelay = 0L
+                        val objInCache = cache[objectId]
+                        var isHit = true
+                        if (objInCache == null) {
+                            isHit = false
+                            storageDelay = remoteStorage.retrieve(duration)
+                            cache[objectId] = true
+                        }
+                        delay(storageDelay + duration)
 
-                    freeProcessingSlots.release()
+                        freeProcessingSlots.release()
 
-                    launch(Dispatchers.IO) {
-                        resultWriter.write(
-                            CacheTask(
-                                taskId,
-                                callbackUrl.toLong(),
-                                duration,
-                                submitTime,
-                                isHit = isHit,
-                                startTime = actualStart,
-                                endTime = Clock.systemUTC().millis(),
-                                storageDelay = dummyStart
+                        launch(Dispatchers.IO) {
+                            resultWriter.write(
+                                CacheTask(
+                                    taskId,
+                                    callbackUrl.toLong(),
+                                    duration,
+                                    submitTime,
+                                    isHit = isHit,
+                                    startTime = actualStart,
+                                    endTime = Clock.systemUTC().millis(),
+                                    storageDelay = dummyStart
+                                )
                             )
-                        )
+                        }
                     }
                 }
             } catch(e: Exception) {
