@@ -47,5 +47,7 @@ public data class Task(
     val totalLoad: Double,
     var submissionTime: Instant,
     val duration: Long,
+    val nature: String?,
+    val deadline: Instant?,
     val trace: TraceWorkload,
 )

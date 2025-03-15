@@ -25,6 +25,7 @@ package org.opendc.compute.simulator.service;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.InstantSource;
+import java.time.temporal.TemporalAmount;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -647,6 +648,7 @@ public final class ComputeService implements AutoCloseable {
         public ServiceTask newTask(
                 @NotNull String name,
                 @NotNull TaskNature nature,
+                @NotNull TemporalAmount duration,
                 @NotNull Instant deadline,
                 @NotNull Flavor flavor,
                 @NotNull Workload workload,
@@ -659,7 +661,7 @@ public final class ComputeService implements AutoCloseable {
             final ServiceFlavor internalFlavor =
                     Objects.requireNonNull(service.flavorById.get(flavor.getUid()), "Unknown flavor");
 
-            ServiceTask task = new ServiceTask(service, uid, name, nature, deadline, internalFlavor, workload, meta);
+            ServiceTask task = new ServiceTask(service, uid, name, nature, duration, deadline, internalFlavor, workload, meta);
 
             service.taskById.put(uid, task);
             service.tasks.add(task);

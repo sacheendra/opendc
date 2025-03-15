@@ -38,6 +38,7 @@ import org.opendc.compute.simulator.service.TaskNature
 import org.opendc.compute.workload.Task
 import org.opendc.experiments.base.experiment.specs.FailureModelSpec
 import org.opendc.experiments.base.experiment.specs.createFailureModel
+import java.time.Duration
 import java.time.Instant
 import java.time.InstantSource
 import java.util.Random
@@ -126,7 +127,8 @@ public suspend fun ComputeService.replay(
                         client.newTask(
                             entry.name,
                             TaskNature(false),
-                            Instant.ofEpochSecond(0),
+                            Duration.ofMillis(entry.duration),
+                            Instant.ofEpochMilli(0),
                             client.newFlavor(
                                 entry.name,
                                 entry.cpuCount,

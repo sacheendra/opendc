@@ -82,6 +82,8 @@ fun createTestTask(
         1800000.0,
         LocalDateTime.parse(submissionTime).toInstant(ZoneOffset.UTC),
         duration,
+        "",
+        null,
         TraceWorkload(
             fragments,
             checkpointInterval,
