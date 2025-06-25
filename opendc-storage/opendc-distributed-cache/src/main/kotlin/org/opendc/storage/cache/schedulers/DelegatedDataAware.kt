@@ -7,18 +7,21 @@ import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.selects.select
 import org.opendc.storage.cache.CacheHost
 import org.opendc.storage.cache.CacheTask
+import org.opendc.storage.cache.TaskEvent
 import org.opendc.storage.cache.TaskScheduler
 import java.time.InstantSource
 import java.util.PriorityQueue
 import kotlin.math.roundToInt
+import kotlin.random.Random
 import kotlin.time.Duration
 
 class DelegatedDataAwarePlacer(
     val period: Duration,
     val clock: InstantSource,
     val subPlacers: List<CentralizedDataAwarePlacer>,
+    val workstealRebalance: Boolean = false,
     val moveSmallestFirst: Boolean = false,
-    val moveOnSteal: Boolean = false,
+    val rng: Random,
     val lookBackward: Boolean = false, // to implement
     val minimizeSpread: Boolean = false, // to implement
 ): ObjectPlacer {
@@ -63,8 +66,8 @@ class DelegatedDataAwarePlacer(
     }
 
     override fun getPlacerFlow(): Flow<TimeCountPair> {
-        val subPlacerFlows = subPlacers.map { it.getPlacerFlow() }
-        return subPlacerFlows.plus(thisFlow).merge()
+//        val subPlacerFlows = subPlacers.map { it.getPlacerFlow() }
+        return thisFlow
     }
 
     override suspend fun complete() {
@@ -82,16 +85,17 @@ class DelegatedDataAwarePlacer(
 
         var task = queue.next()
         // Late binding check
-        while (task != null && task.hostId > 0) {
+        while (task != null && task.hostId >= 0) {
             task = queue.next()
         }
 
         var busiestPlacer: CentralizedDataAwarePlacer? = null
         if (task == null) {
-            busiestPlacer = subPlacers.shuffled().take(2).maxBy { it.globalQueueSize() }
+            busiestPlacer = subPlacers.shuffled(rng).take(2).maxBy { it.globalQueueSize() }
             task = busiestPlacer.globalQueue.next()
             // Late binding check
-            while (task != null && task.hostId > 0) {
+            while (task != null && task.hostId >= 0) {
+                task.callback?.invoke(TaskEvent.LATEBIND_TOMBSTONE)
                 task = busiestPlacer.globalQueue.next()
             }
 
@@ -112,7 +116,7 @@ class DelegatedDataAwarePlacer(
 
         if (task != null && !globalTask) {
             task.hostId = host.hostId
-            task.callback?.invoke()
+            task.callback?.invoke(TaskEvent.SCHEDULED_NOW)
             return task
         }
 
@@ -120,7 +124,7 @@ class DelegatedDataAwarePlacer(
             task.hostId = host.hostId
             if (task.objectId in busiestPlacer!!.keyToNodeMap) {
                 task.stolen = true
-                if (moveOnSteal) {
+                if (workstealRebalance) {
                     busiestPlacer.mapKey(task.objectId, host)
                 }
             } else {
@@ -135,8 +139,14 @@ class DelegatedDataAwarePlacer(
     override suspend fun offerTask(task: CacheTask) {
         val placerIdx = (task.objectId % numPlacers).toInt()
         val placer = subPlacers[placerIdx]
-        task.callback = {
-            placer.lateBindingSizeCorrection++
+        task.callback = {event ->
+            // Use event to dynamically modify the size of global queue
+            // to account for late binding
+            if (event == TaskEvent.SCHEDULED_NOW) {
+                placer.lateBindingSizeCorrection++
+            } else if (event == TaskEvent.LATEBIND_TOMBSTONE) {
+                placer.lateBindingSizeCorrection--
+            }
         }
         placer.offerTask(task)
     }
@@ -150,15 +160,13 @@ class DelegatedDataAwarePlacer(
         val totalScore = perPlacerNodeScores.sumOf { it.value.values.sum() }.toDouble()
         val scorePerNode = totalScore / scheduler.hosts.size
 
-//        println("placer counts")
-//        println(perPlacerNodeScores)
-
         val nodeToPlacer: MutableMap<Int?, MutableList<PlacerScorePair>> = mutableMapOf()
-        perPlacerNodeScores.forEach { placer ->
-            placer.value.forEach { entry ->
-                val placerList = nodeToPlacer.computeIfAbsent(entry.key) { _ -> mutableListOf() }
+        perPlacerNodeScores.forEach { placerEntry ->
+            placerEntry.value.forEach { nodeEntry ->
+                val placerList = nodeToPlacer.computeIfAbsent(nodeEntry.key) { _ -> mutableListOf() }
+                val perPartScore = nodeEntry.value.toDouble() / choppedParts
                 (0 until choppedParts).forEach { _ ->
-                    placerList.add(PlacerScorePair(placer.index, entry.value.toDouble() / choppedParts))
+                    placerList.add(PlacerScorePair(placerEntry.index, perPartScore))
                 }
             }
         }
@@ -183,7 +191,7 @@ class DelegatedDataAwarePlacer(
             }
 
             var currentScore = 0.0
-            var cutOffIndex = 0
+            var cutOffIndex = -1
             for (it in placerList.withIndex()) {
                 val newScore = currentScore + it.value.score
                 if (newScore > scorePerNode) break
@@ -219,6 +227,7 @@ class DelegatedDataAwarePlacer(
             }
         }
 
+//        println(perPlacerNodeScores)
         for (placer in subPlacers.withIndex()) {
             // Need to normalize as each subplacer expects allocations that sum to 1
             val nodeAllocs = placerToNodeAllocs[placer.index]

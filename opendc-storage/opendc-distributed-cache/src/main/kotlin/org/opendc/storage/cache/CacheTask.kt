@@ -21,15 +21,20 @@ data class CacheTask(
     val taskId: Long,
     val objectId: Long,
     val duration: Long,
-    val submitTime: Long,
+    var submitTime: Long,
     var stolen: Boolean = false,
     var startTime: Long = -1,
     var endTime: Long = -1,
     var isHit: Boolean = true,
     var hostId: Int = -1,
     var storageDelay: Long = -1,
-    var callback: (() -> Unit)? = null
+    var callback: ((event: TaskEvent) -> Unit)? = null,
+    var metadata: String? = null,
 )
+
+enum class TaskEvent {
+    SCHEDULED_NOW, LATEBIND_TOMBSTONE
+}
 
 class CacheTaskWriteSupport : WriteSupport<CacheTask>() {
     /**

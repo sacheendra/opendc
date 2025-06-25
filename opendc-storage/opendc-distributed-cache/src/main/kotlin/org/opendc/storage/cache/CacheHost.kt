@@ -11,12 +11,11 @@ import org.opendc.storage.cache.schedulers.GreedyObjectPlacer
 import java.time.InstantSource
 
 class CacheHost(
-    val numProcessingSlots: Int = 4,
+    val concurrentTasks: Int = 4,
     val numCacheSlots: Int = 1000,
     val clock: InstantSource,
     val remoteStorage: RemoteStorage,
-    val scheduler: TaskScheduler,
-    val metricRecorder: MetricRecorder
+    val scheduler: TaskScheduler
 ) : Node {
 
     companion object {
@@ -26,7 +25,7 @@ class CacheHost(
             }
     }
 
-    val hostId = nextHostId
+    var hostId = nextHostId
 
     val cache: MutableMap<Long, Boolean> = if (numCacheSlots > 0) {
         LRUMap<Long, Boolean>(numCacheSlots, numCacheSlots)
@@ -34,7 +33,7 @@ class CacheHost(
         HashMap<Long, Boolean>()
     }
 
-    val freeProcessingSlots = Semaphore(numProcessingSlots)
+    val freeProcessingSlots = Semaphore(concurrentTasks)
 
     suspend fun processTasks(channel: SendChannel<CacheTask>) = coroutineScope {
         while(true) {
@@ -53,21 +52,17 @@ class CacheHost(
     }
 
     suspend fun runTask(task: CacheTask) = coroutineScope {
-        metricRecorder.recordStart(task)
-
         task.startTime = clock.millis()
         var storageDelay = 0L
         val objInCache = cache[task.objectId]
         if (objInCache == null) {
-            storageDelay = remoteStorage.retrieve()
+            storageDelay = remoteStorage.retrieve(task.duration)
             cache[task.objectId] = true
             task.isHit = false
         }
-        delay(task.duration + storageDelay)
+        delay(storageDelay + task.duration)
         task.endTime = clock.millis()
         task.storageDelay = storageDelay
-
-        metricRecorder.recordCompletion(task)
     }
 
     override fun name(): String {

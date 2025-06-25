@@ -37,6 +37,7 @@ import java.nio.file.Files
 import java.nio.file.Paths
 import java.time.InstantSource
 import kotlin.IllegalArgumentException
+import kotlin.random.Random
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -51,13 +52,18 @@ class DistCache : CliktCommand() {
     val watermarks: Pair<Double, Double> by option().double().pair().default(Pair(0.6, 0.9))
     val manualscalerEnabled: Boolean by option().flag(default=false)
     val manualOptions: Triple<Long, Long, Long> by option().long().triple().default(Triple(4000000, 11, 22))
+    val initHosts: Int by option().int().default(20)
     // Work stealing options
     val workstealEnabled: Boolean by option().flag(default=false)
     // Minimize movement for centralized algos
     val minMovement: Boolean by option().flag(default=true)
-    val rebalanceEnabled: Boolean by option().flag(default=false)
-    val rebalanceInterval: Int by option().int().default(1)
-    val rebalanceIntervalDelegation: Int by option().int().default(10)
+    val rebalanceType: String? by option()
+    val rebalanceInterval: Int by option().int().default(300)
+//    val rebalanceIntervalDelegation: Int by option().int().default(10)
+    val concurrentTasks: Int by option().int().default(4)
+    val bandwidthPenalty: Boolean by option().flag(default=false)
+    val cacheSlots: Int by option().int().default(1000)
+    val randomSeed: Int by option().int().default(42)
     // Indirection based load balancing options
     // Indirection based autoscaling options
     // Prefetching options
@@ -69,11 +75,10 @@ class DistCache : CliktCommand() {
         var usedMemory = 0.0
         runSimulation {
 
-            // Setup remote storage
-            val remoteStorage = RemoteStorage()
-
             val outputFolderPath = Paths.get(outputFolder)
             Files.createDirectories(outputFolderPath)
+
+            val rng = Random(randomSeed)
 
             // Setup metrics recorder
             val resultWriter = LocalParquetWriter.builder(outputFolderPath.resolve("tasks.parquet"), CacheTaskWriteSupport())
@@ -89,22 +94,28 @@ class DistCache : CliktCommand() {
             val numHosts = if (manualscalerEnabled) {
                 manualOptions.second.toInt()
             } else {
-                11
+                initHosts
             }
+
+            // Setup remote storage
+            // a storage cluster bandwidth smaller 10x less than the intra-cluster bandwith is common
+            // Found in frontier, find other citations
+            val remoteStorage = RemoteStorage(bandwidthPenalty)
+
             // Setup scheduler
-            val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10, timeSource)
+            val objectPlacer = mapPlacementAlgoName(placementAlgo, numHosts*10, timeSource, rng)
             val scheduler = TaskScheduler(objectPlacer)
 
             // Setup hosts
             val addHostsFlow = flow {
                 scheduler.addHosts((1..numHosts)
-                    .map { CacheHost(4, 100, timeSource, remoteStorage, scheduler, metricRecorder) })
+                    .map { CacheHost(concurrentTasks, cacheSlots, timeSource, remoteStorage, scheduler) })
                 emit(Unit)
             }
 
             // Setup autoscaler
             val autoscaler = Autoscaler(timeSource, remoteStorage, scheduler, metricRecorder, watermarks)
-            val manualScaler = ManualScaler(manualOptions.first + warmupDelay, manualOptions.third, scheduler, timeSource, remoteStorage, metricRecorder)
+            val manualScaler = ManualScaler(manualOptions.first + warmupDelay, manualOptions.third, concurrentTasks, cacheSlots, scheduler, timeSource, remoteStorage, metricRecorder)
 
             // Write results for completed tasks
             val writeTaskFlow = scheduler.completedTaskFlow
@@ -135,7 +146,7 @@ class DistCache : CliktCommand() {
                 .onEach {
                     launch {
                         delay(it.submitTime - currentTime)
-                        metricRecorder.recordSubmission(it)
+//                        metricRecorder.recordSubmission(it)
                         scheduler.offerTask(it)
                     }
                 }.drop(8000*120)
@@ -152,12 +163,12 @@ class DistCache : CliktCommand() {
                     lastTask = it
                     launch {
                         delay(it.submitTime - currentTime + warmupDelay)
-                        metricRecorder.recordSubmission(it)
+//                        metricRecorder.recordSubmission(it)
                         scheduler.offerTask(it)
                     }
                 }
                 .onCompletion {
-                    delay(lastTask!!.submitTime - currentTime + 999 + warmupDelay)
+                    delay(lastTask!!.submitTime - currentTime + 9999 + warmupDelay)
 
                     // Need to stop timed events like autoscaling before the scheduler
                     metricRecorder.complete()
@@ -171,7 +182,7 @@ class DistCache : CliktCommand() {
                 metricRecorder.metricsFlow)
 
             val placerFlow = objectPlacer.getPlacerFlow()
-            if (rebalanceEnabled && placerFlow != null) {
+            if (rebalanceType == "periodic" && placerFlow != null) {
                 val rebalanceWriter = LocalParquetWriter.builder(outputFolderPath.resolve("moves.parquet"), TimeCountWriteSupport())
                     .withCompressionCodec(CompressionCodecName.SNAPPY)
                     .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
@@ -202,16 +213,22 @@ class DistCache : CliktCommand() {
         println("OK!")
     }
 
-    fun mapPlacementAlgoName(name: String, size: Int, timeSource: InstantSource): ObjectPlacer {
+    fun mapPlacementAlgoName(name: String, size: Int, timeSource: InstantSource, rng: Random): ObjectPlacer {
+        val timeRebalance = rebalanceType=="time"
+        val workstealRebalance = rebalanceType=="worksteal"
+        if (workstealRebalance && !workstealEnabled) {
+            throw IllegalArgumentException("Worksteal rebalancing enabled, but workstealing is not enabled")
+        }
+
         if (name == "greedy") {
             return GreedyObjectPlacer()
         } else if (name == "random") {
             return RandomObjectPlacer()
         } else if (name == "centralized") {
-            return CentralizedDataAwarePlacer(rebalanceInterval.seconds, timeSource, minMovement, workstealEnabled)
+            return CentralizedDataAwarePlacer(rebalanceInterval.seconds, timeSource, minMovement, workstealEnabled, timeRebalance, workstealRebalance)
         } else if (name == "delegated") {
-            val subPlacers = List(5) { _ -> CentralizedDataAwarePlacer(rebalanceInterval.seconds, timeSource, minMovement, workstealEnabled) }
-            return DelegatedDataAwarePlacer(rebalanceIntervalDelegation.seconds, timeSource, subPlacers)
+            val subPlacers = List(5) { _ -> CentralizedDataAwarePlacer(rebalanceInterval.seconds, timeSource, minMovement, workstealEnabled, workstealRebalance, timeRebalance) }
+            return DelegatedDataAwarePlacer(rebalanceInterval.seconds, timeSource, subPlacers, workstealRebalance, rng=rng)
         }
 
         // Beamer is missing
@@ -230,6 +247,6 @@ class DistCache : CliktCommand() {
             }
         }
 
-        return ConsistentHashWrapper(ConsistentHash.create(algo, ConsistentHash.DEFAULT_HASH_ALGOTITHM, size), workstealEnabled)
+        return ConsistentHashWrapper(ConsistentHash.create(algo, ConsistentHash.DEFAULT_HASH_ALGOTITHM, size), workstealEnabled, rng)
     }
 }

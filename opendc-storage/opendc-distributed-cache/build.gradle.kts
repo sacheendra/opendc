@@ -39,7 +39,7 @@ dependencies {
 
     implementation(libs.clikt)
 
-    implementation(files("libs/netpar-1.0.0-jar-with-dependencies.jar"))
+    implementation(files("../libs/netpar-1.0.0-jar-with-dependencies.jar"))
 
     testImplementation(libs.slf4j.simple)
 }
